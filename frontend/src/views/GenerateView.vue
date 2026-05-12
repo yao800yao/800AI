@@ -140,6 +140,7 @@ const feedbackTarget = ref<{
   prompt: string;
   createdAt: string;
 } | null>(null);
+const viewportWidth = ref(typeof window === "undefined" ? 1200 : window.innerWidth);
 
 const historyVisible = ref(false);
 const historyItems = ref<PromptHistoryItem[]>([]);
@@ -319,6 +320,39 @@ function createPendingImages(count: number) {
   }));
 }
 
+function parseAspectRatio(value?: string) {
+  if (!value) return null;
+  const normalized = value.trim();
+  const ratioMatch = normalized.match(/^(\d+(?:\.\d+)?)\s*:\s*(\d+(?:\.\d+)?)$/);
+  if (ratioMatch) {
+    const width = Number(ratioMatch[1]);
+    const height = Number(ratioMatch[2]);
+    if (width > 0 && height > 0) return `${width} / ${height}`;
+  }
+
+  const sizeMatch = normalized.match(/^(\d+(?:\.\d+)?)\s*[xX]\s*(\d+(?:\.\d+)?)$/);
+  if (sizeMatch) {
+    const width = Number(sizeMatch[1]);
+    const height = Number(sizeMatch[2]);
+    if (width > 0 && height > 0) return `${width} / ${height}`;
+  }
+
+  return null;
+}
+
+function getTaskAspectRatio(task: GeneratedTaskItem) {
+  return parseAspectRatio(task.customSize) || parseAspectRatio(task.size) || "1 / 1";
+}
+
+function getTaskAspectRatioValue(task: GeneratedTaskItem) {
+  const ratio = getTaskAspectRatio(task);
+  const [widthText, heightText] = ratio.split("/").map((item) => item.trim());
+  const width = Number(widthText);
+  const height = Number(heightText);
+  if (!width || !height) return 1;
+  return width / height;
+}
+
 function createLocalGeneratedTask(taskDraft: GeneratedTaskDraft): GeneratedTaskItem {
   return {
     localId: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
@@ -345,6 +379,37 @@ const resultItems = computed(() => (
     index,
   })))
 ));
+
+const resultColumnCount = computed(() => {
+  if (viewportWidth.value <= 640) return 1;
+  if (viewportWidth.value <= 960) return 2;
+  return 3;
+});
+
+const resultColumns = computed(() => {
+  const columns = Array.from({ length: resultColumnCount.value }, () => [] as typeof resultItems.value);
+  const columnHeights = Array.from({ length: resultColumnCount.value }, () => 0);
+  const fixedRowItems = resultColumnCount.value * 2;
+
+  resultItems.value.forEach((item, itemIndex) => {
+    let columnIndex = 0;
+    if (itemIndex < fixedRowItems) {
+      columnIndex = itemIndex % resultColumnCount.value;
+    } else {
+      columnIndex = columnHeights.reduce((bestIndex, height, index, list) => (
+        height < list[bestIndex] ? index : bestIndex
+      ), 0);
+    }
+
+    columns[columnIndex].push(item);
+    columnHeights[columnIndex] += 1 / getTaskAspectRatioValue(item.task);
+  });
+  return columns;
+});
+
+function syncViewportWidth() {
+  viewportWidth.value = window.innerWidth;
+}
 
 function updateGeneratedTask(localId: string, updater: (task: GeneratedTaskItem) => GeneratedTaskItem) {
   generatedTasks.value = generatedTasks.value.map((task) => (
@@ -1209,6 +1274,8 @@ async function loadTaskSceneConfigs() {
 }
 
 onMounted(async () => {
+  syncViewportWidth();
+  window.addEventListener("resize", syncViewportWidth);
   await Promise.all([
     loadTaskSceneConfigs(),
     loadRecentGeneratedTasks(),
@@ -1231,6 +1298,7 @@ onActivated(() => {
 
 onBeforeUnmount(() => {
   stopAllTaskPolling();
+  window.removeEventListener("resize", syncViewportWidth);
   referenceItems.value.forEach((item) => revokeObjectUrl(item.objectUrl));
   revokeObjectUrl(sourcePreviewUrl.value);
 });
@@ -1920,85 +1988,96 @@ watch(() => auth.isLoggedIn, (isLoggedIn) => {
 
         <div class="result-body">
           <template v-if="resultItems.length">
-            <TransitionGroup name="generate-result" tag="div" class="result-list">
-              <div
-                v-for="(item, index) in resultItems"
-                :key="`${item.taskLocalId}-${item.image.id}-${item.index}`"
-                class="result-card"
-                :style="{ '--generate-result-delay': `${Math.min(index, 9) * 45}ms` }"
-                :class="{ pending: item.image.status === 'pending' }"
+            <div class="result-list">
+              <TransitionGroup
+                v-for="(column, columnIndex) in resultColumns"
+                :key="`result-column-${columnIndex}`"
+                name="generate-result"
+                tag="div"
+                class="result-column"
               >
-                <a-tooltip v-if="item.taskId" title="反馈">
-                  <button
-                    type="button"
-                    class="result-more-trigger icon-chip"
-                    :class="{ 'result-more-trigger-failed': item.image.status === 'failed' }"
-                    @click.stop="openFeedbackDialogForGeneratedTask(item.task)"
-                  >
-                    <MessageOutlined class="result-more-icon" />
-                  </button>
-                </a-tooltip>
                 <div
-                  class="result-frame"
-                  :class="{
-                    pending: item.image.status === 'pending',
-                    failed: item.image.status === 'failed',
-                    clickable: !!getResultDisplayUrl(item.image),
+                  v-for="(item, index) in column"
+                  :key="`${item.taskLocalId}-${item.image.id}-${item.index}`"
+                  class="result-card"
+                  :style="{
+                    '--generate-result-delay': `${Math.min(columnIndex + index, 9) * 45}ms`,
+                    '--result-aspect-ratio': getTaskAspectRatio(item.task),
                   }"
-                  @click="getResultPreviewUrl(item.image) && handlePreview(getResultPreviewUrl(item.image))"
+                  :class="{ pending: item.image.status === 'pending' }"
                 >
-                  <template v-if="item.image.status === 'success' && getResultDisplayUrl(item.image)">
-                    <img :src="getResultDisplayUrl(item.image)" alt="生成结果" loading="lazy" />
-                    <div class="result-actions">
-                      <a-tooltip title="查看原图">
-                        <a-button shape="circle" class="icon-chip" @click.stop="handlePreview(getResultPreviewUrl(item.image))">
-                          <template #icon><EyeOutlined /></template>
-                        </a-button>
-                      </a-tooltip>
-                      <a-tooltip title="结果图编辑">
-                        <a-button shape="circle" class="icon-chip" @click.stop="handleEditImageTask(item.task, item.image)">
-                          <template #icon><EditOutlined /></template>
-                        </a-button>
-                      </a-tooltip>
-                      <a-tooltip title="重新生成">
-                        <a-button
-                          shape="circle"
-                          class="icon-chip"
-                          :disabled="!item.taskId"
-                          @click.stop="handleReeditTask(item.task)"
-                        >
-                          <template #icon><ReloadOutlined /></template>
-                        </a-button>
-                      </a-tooltip>
-                      <a-tooltip title="下载原图">
-                        <a-button shape="circle" class="icon-chip" @click.stop="handleDownload(item.image.id, item.image.image_url, item.image.preview_url)">
-                          <template #icon><DownloadOutlined /></template>
-                        </a-button>
-                      </a-tooltip>
-                    </div>
-                  </template>
+                  <a-tooltip v-if="item.taskId" title="反馈">
+                    <button
+                      type="button"
+                      class="result-more-trigger icon-chip"
+                      :class="{ 'result-more-trigger-failed': item.image.status === 'failed' }"
+                      @click.stop="openFeedbackDialogForGeneratedTask(item.task)"
+                    >
+                      <MessageOutlined class="result-more-icon" />
+                    </button>
+                  </a-tooltip>
+                  <div
+                    class="result-frame"
+                    :class="{
+                      pending: item.image.status === 'pending',
+                      failed: item.image.status === 'failed',
+                      clickable: !!getResultDisplayUrl(item.image),
+                    }"
+                    @click="getResultPreviewUrl(item.image) && handlePreview(getResultPreviewUrl(item.image))"
+                  >
+                    <template v-if="item.image.status === 'success' && getResultDisplayUrl(item.image)">
+                      <img :src="getResultDisplayUrl(item.image)" alt="生成结果" loading="lazy" />
+                      <div class="result-actions">
+                        <a-tooltip title="查看原图">
+                          <a-button shape="circle" class="icon-chip" @click.stop="handlePreview(getResultPreviewUrl(item.image))">
+                            <template #icon><EyeOutlined /></template>
+                          </a-button>
+                        </a-tooltip>
+                        <a-tooltip title="结果图编辑">
+                          <a-button shape="circle" class="icon-chip" @click.stop="handleEditImageTask(item.task, item.image)">
+                            <template #icon><EditOutlined /></template>
+                          </a-button>
+                        </a-tooltip>
+                        <a-tooltip title="重新生成">
+                          <a-button
+                            shape="circle"
+                            class="icon-chip"
+                            :disabled="!item.taskId"
+                            @click.stop="handleReeditTask(item.task)"
+                          >
+                            <template #icon><ReloadOutlined /></template>
+                          </a-button>
+                        </a-tooltip>
+                        <a-tooltip title="下载原图">
+                          <a-button shape="circle" class="icon-chip" @click.stop="handleDownload(item.image.id, item.image.image_url, item.image.preview_url)">
+                            <template #icon><DownloadOutlined /></template>
+                          </a-button>
+                        </a-tooltip>
+                      </div>
+                    </template>
 
-                  <template v-else-if="item.image.status === 'failed'">
-                    <img :src="failedResultAsset" alt="生成失败" class="failed-image" />
-                    <div class="frame-state error">
-                      <span>{{ getGeneratedTaskFailureMessage(item.task, item.image) }}</span>
-                    <a-button shape="circle" class="icon-chip" @click.stop="handleReeditTask(item.task)">
-                      <template #icon><EditOutlined /></template>
-                    </a-button>
-                    </div>
-                  </template>
+                    <template v-else-if="item.image.status === 'failed'">
+                      <img :src="failedResultAsset" alt="生成失败" class="failed-image" />
+                      <div class="frame-state error">
+                        <span>{{ getGeneratedTaskFailureMessage(item.task, item.image) }}</span>
+                      <a-button shape="circle" class="icon-chip" @click.stop="handleReeditTask(item.task)">
+                        <template #icon><EditOutlined /></template>
+                      </a-button>
+                      </div>
+                    </template>
 
-                  <template v-else>
-                    <div class="frame-state">
-                      <a-spin
-                        :indicator="h(LoadingOutlined, { style: neutralIndicatorStyle })"
-                      />
-                      <span>正在生成图片...</span>
-                    </div>
-                  </template>
+                    <template v-else>
+                      <div class="frame-state">
+                        <a-spin
+                          :indicator="h(LoadingOutlined, { style: neutralIndicatorStyle })"
+                        />
+                        <span>正在生成图片...</span>
+                      </div>
+                    </template>
+                  </div>
                 </div>
-              </div>
-            </TransitionGroup>
+              </TransitionGroup>
+            </div>
 
             <div class="result-list-footnote">
               当前仅展示最近 10 次生图任务结果。若需查看更早记录、完整参数或全部结果，请前往
@@ -3370,10 +3449,17 @@ watch(() => auth.isLoggedIn, (isLoggedIn) => {
 }
 
 .result-list {
-  display: block;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  align-items: start;
+  gap: 12px;
   margin-top: 12px;
-  column-count: 3;
-  column-gap: 12px;
+}
+
+.result-column {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
 }
 
 .result-body {
@@ -3417,19 +3503,12 @@ watch(() => auth.isLoggedIn, (isLoggedIn) => {
 }
 
 .result-card {
-  display: inline-block;
+  display: block;
   width: 100%;
-  margin: 0 0 16px;
+  margin: 0;
   position: relative;
   border-radius: 16px;
-  break-inside: avoid;
-  -webkit-column-break-inside: avoid;
   transition: transform var(--motion-duration-hover) var(--motion-ease-enter);
-
-  &.pending .result-frame {
-    aspect-ratio: 1 / 1;
-    min-height: auto;
-  }
 
   &:hover {
     transform: translateY(-4px);
@@ -3442,6 +3521,7 @@ watch(() => auth.isLoggedIn, (isLoggedIn) => {
 
 .result-frame {
   position: relative;
+  aspect-ratio: var(--result-aspect-ratio, 1 / 1);
   min-height: 0;
   border-radius: 16px;
   overflow: hidden;
@@ -3455,8 +3535,9 @@ watch(() => auth.isLoggedIn, (isLoggedIn) => {
 
   img {
     width: 100%;
-    height: auto;
+    height: 100%;
     display: block;
+    object-fit: cover;
     transition: transform var(--motion-duration-emphasis) var(--motion-ease-enter);
   }
 
@@ -3472,7 +3553,6 @@ watch(() => auth.isLoggedIn, (isLoggedIn) => {
     border-color: rgba(214, 87, 75, 0.34);
     background: linear-gradient(180deg, #fff0ed, #ffe1db);
     box-shadow: 0 14px 26px rgba(214, 87, 75, 0.16);
-    min-height: 220px;
   }
 }
 
@@ -3839,6 +3919,7 @@ html:is([data-theme="dark"], [data-theme="midnight"]) .generate-page .result-mor
     opacity var(--motion-duration-emphasis) var(--motion-ease-soft),
     transform var(--motion-duration-emphasis-plus) var(--motion-ease-enter);
   transition-delay: var(--generate-result-delay, 0ms);
+  will-change: opacity, transform;
 }
 
 .generate-result-enter-from,
@@ -3849,6 +3930,7 @@ html:is([data-theme="dark"], [data-theme="midnight"]) .generate-page .result-mor
 
 .generate-result-move {
   transition: transform var(--motion-duration-reveal-fast) var(--motion-ease-enter);
+  will-change: transform;
 }
 
 .history-item-enter-active,
@@ -3974,7 +4056,7 @@ html:is([data-theme="dark"], [data-theme="midnight"]) .generate-page .result-mor
   }
 
   .result-list {
-    column-count: 2;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .result-body {
@@ -4040,7 +4122,7 @@ html:is([data-theme="dark"], [data-theme="midnight"]) .generate-page .result-mor
   }
 
   .result-list {
-    column-count: 1;
+    grid-template-columns: 1fr;
   }
 
   .result-head {

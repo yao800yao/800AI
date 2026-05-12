@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, reactive, computed } from "vue";
+import { ref, onMounted, reactive, computed, watch } from "vue";
 import { message, Modal } from "ant-design-vue";
 import { CopyOutlined, PlusOutlined, TeamOutlined, WalletOutlined, SearchOutlined, UndoOutlined } from "@ant-design/icons-vue";
 import {
@@ -41,16 +41,18 @@ const creditsForm = reactive({ amount: 0, description: "" });
 const whitelistOpen = ref(false);
 const whitelistKeyword = ref("");
 const whitelistLoadingId = ref<string | null>(null);
+const currentPage = ref(1);
+const pageSize = 30;
 
 const columns = [
   { title: "ID", dataIndex: "id", width: 58 },
-  { title: "用户", dataIndex: "username", width: 240 },
-  { title: "角色", dataIndex: "role", width: 100 },
-  { title: "白名单", dataIndex: "is_whitelisted", width: 100 },
-  { title: "积分", dataIndex: "credits", width: 100 },
-  { title: "状态", dataIndex: "status", width: 90 },
-  { title: "创建时间", dataIndex: "created_at", width: 170 },
-  { title: "操作", key: "action", width: 300 },
+  { title: "用户", dataIndex: "username", width: 212 },
+  { title: "角色", dataIndex: "role", width: 88 },
+  { title: "白名单", dataIndex: "is_whitelisted", width: 88 },
+  { title: "积分", dataIndex: "credits", width: 84 },
+  { title: "状态", dataIndex: "status", width: 82 },
+  { title: "创建时间", dataIndex: "created_at", width: 154 },
+  { title: "操作", key: "action", width: 340 },
 ];
 
 const filteredUsers = computed(() => {
@@ -70,6 +72,19 @@ const filteredUsers = computed(() => {
     }
     return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
   });
+});
+
+const paginatedUsers = computed(() => {
+  const start = (currentPage.value - 1) * pageSize;
+  return filteredUsers.value.slice(start, start + pageSize);
+});
+
+const currentRangeSummary = computed(() => {
+  const total = filteredUsers.value.length;
+  if (!total) return "当前第 0-0 条 / 共 0 条";
+  const start = (currentPage.value - 1) * pageSize + 1;
+  const end = Math.min(currentPage.value * pageSize, total);
+  return `当前第 ${start}-${end} 条 / 共 ${total} 条`;
 });
 
 const filteredWhitelistUsers = computed(() => {
@@ -93,6 +108,15 @@ async function load() {
   finally { loading.value = false; }
 }
 onMounted(load);
+
+watch(() => [filters.username, filters.status, filters.sort], () => {
+  currentPage.value = 1;
+});
+
+watch(filteredUsers, (list) => {
+  const maxPage = Math.max(1, Math.ceil(list.length / pageSize));
+  if (currentPage.value > maxPage) currentPage.value = maxPage;
+});
 
 async function handleCreate() {
   if (!form.username || !form.password) { message.warning("请填写完整"); return; }
@@ -232,6 +256,11 @@ function resetFilters() {
   filters.username = "";
   filters.status = undefined;
   filters.sort = "created_at_desc";
+  currentPage.value = 1;
+}
+
+function handlePageChange(page: number) {
+  currentPage.value = page;
 }
 
 function formatUserId(id?: string) {
@@ -304,15 +333,13 @@ function fmtTime(t: string) { return t ? new Date(t).toLocaleString("zh-CN") : "
         <template #icon><UndoOutlined /></template>
         重置
       </a-button>
-      <div class="filter-result-count">
-        共筛出 <span>{{ filteredUsers.length }}</span> 个用户
-      </div>
+      <div class="filter-result-count">{{ currentRangeSummary }}</div>
     </div>
 
     <div class="warm-card warm-table-card motion-fade-up motion-card-lift" style="--motion-delay: 200ms">
       <a-table
         :columns="columns"
-        :data-source="filteredUsers"
+        :data-source="paginatedUsers"
         :loading="loading"
         row-key="id"
         :pagination="false"
@@ -406,6 +433,18 @@ function fmtTime(t: string) { return t ? new Date(t).toLocaleString("zh-CN") : "
           </template>
         </template>
       </a-table>
+    </div>
+
+    <div class="warm-pagination">
+      <div class="pagination-summary">{{ currentRangeSummary }}</div>
+      <a-pagination
+        v-if="filteredUsers.length > pageSize"
+        :current="currentPage"
+        :total="filteredUsers.length"
+        :page-size="pageSize"
+        show-less-items
+        @change="handlePageChange"
+      />
     </div>
 
     <!-- Create user modal -->
@@ -588,6 +627,12 @@ function fmtTime(t: string) { return t ? new Date(t).toLocaleString("zh-CN") : "
   }
 }
 
+.pagination-summary {
+  color: #8c7458;
+  font-size: 13px;
+  white-space: nowrap;
+}
+
 .user-cell {
   display: flex;
   align-items: center;
@@ -641,17 +686,19 @@ function fmtTime(t: string) { return t ? new Date(t).toLocaleString("zh-CN") : "
 
 .table-actions {
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   align-items: center;
-  gap: 6px;
-  max-width: 300px;
+  gap: 4px;
+  max-width: 340px;
+  white-space: nowrap;
 }
 
 .user-action-btn {
   height: 30px;
-  padding-inline: 8px;
-  border-radius: 10px;
+  padding-inline: 6px;
+  border-radius: 9px;
   font-weight: 600;
+  font-size: 12px;
   margin: 0;
 }
 
@@ -810,6 +857,15 @@ html:is([data-theme="dark"], [data-theme="midnight"]) .warm-page .warm-tag-muted
 :deep(.ant-badge-status-text) {
   color: var(--theme-title);
   font-weight: 600;
+}
+
+:deep(.admin-mobile-table .ant-table-thead > tr > th) {
+  padding: 11px 12px;
+  white-space: nowrap;
+}
+
+:deep(.admin-mobile-table .ant-table-tbody > tr > td) {
+  padding: 8px 12px;
 }
 
 @media (max-width: 768px) {

@@ -73,17 +73,16 @@ const filters = reactive<{
 });
 
 const columns = [
-  { title: "ID", dataIndex: "task_id", width: 70 },
-  { title: "用户", dataIndex: "username", width: 150 },
-  { title: "来源", dataIndex: "source", width: 90 },
-  { title: "类型", dataIndex: "mode", width: 100 },
-  { title: "模型", dataIndex: "model", width: 120 },
-  { title: "消耗积分", dataIndex: "credit_cost", width: 110 },
-  { title: "提示词", dataIndex: "prompt", width: 220, ellipsis: true },
-  { title: "状态", dataIndex: "status", width: 90 },
-  { title: "图片", key: "imgCount", width: 70 },
-  { title: "时间", dataIndex: "created_at", width: 180 },
-  { title: "操作", key: "actions", width: 90, fixed: "right" as const },
+  { title: "用户", dataIndex: "username", width: 132 },
+  { title: "来源", dataIndex: "source", width: 76 },
+  { title: "类型", dataIndex: "mode", width: 88 },
+  { title: "模型", dataIndex: "model", width: 108 },
+  { title: "消耗积分", dataIndex: "credit_cost", width: 94 },
+  { title: "提示词", dataIndex: "prompt", width: 190, ellipsis: true },
+  { title: "状态", dataIndex: "status", width: 82 },
+  { title: "图片", key: "imgCount", width: 58 },
+  { title: "时间", dataIndex: "created_at", width: 156 },
+  { title: "操作", key: "actions", width: 72 },
 ];
 
 const modelOptions = computed(() => {
@@ -164,13 +163,21 @@ const filterSignature = computed(() => JSON.stringify({
 function defaultPresetByGranularity(value: AdminAnalyticsGranularity) {
   if (value === "week") return "8w";
   if (value === "month") return "6m";
-  return "3d";
+  return "7d";
 }
 
 function applyPresetRange(value: string) {
   const now = dayjs();
+  if (value === "today") {
+    filters.dateRange = [now.startOf("day"), now.endOf("day")];
+    return;
+  }
   if (value === "3d") {
     filters.dateRange = [now.subtract(2, "day").startOf("day"), now.endOf("day")];
+    return;
+  }
+  if (value === "7d") {
+    filters.dateRange = [now.subtract(6, "day").startOf("day"), now.endOf("day")];
     return;
   }
   if (value === "30d") {
@@ -193,7 +200,7 @@ function applyPresetRange(value: string) {
     filters.dateRange = [now.subtract(11, "month").startOf("day"), now.endOf("day")];
     return;
   }
-  filters.dateRange = [now.subtract(2, "day").startOf("day"), now.endOf("day")];
+  filters.dateRange = [now.subtract(6, "day").startOf("day"), now.endOf("day")];
 }
 
 function buildAnalyticsQuery(): AdminAnalyticsQuery {
@@ -515,8 +522,6 @@ watch(filterSignature, async () => {
           :loading="historyLoading"
           :row-key="(record: HistoryItem) => record.display_id || record.task_id"
           :pagination="false"
-          sticky
-          :scroll="{ x: 1200, y: 560 }"
           class="admin-mobile-table"
         >
           <template #bodyCell="{ column, record }">
@@ -527,9 +532,6 @@ watch(filterSignature, async () => {
                 </a-avatar>
                 <span>{{ record.username || "-" }}</span>
               </div>
-            </template>
-            <template v-else-if="column.dataIndex === 'task_id'">
-              {{ record.display_id || record.task_id }}
             </template>
             <template v-else-if="column.dataIndex === 'mode'">
               {{ modeLabel(record.mode) }}
@@ -747,9 +749,10 @@ watch(filterSignature, async () => {
 .table-user-cell {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
   color: var(--theme-title);
   font-weight: 700;
+  min-width: 0;
 }
 
 .table-user-avatar {
@@ -758,9 +761,14 @@ watch(filterSignature, async () => {
   font-weight: 700;
 }
 
+:deep(.admin-mobile-table .ant-table-tbody > tr > td) {
+  padding: 10px 12px;
+}
+
 .table-detail-btn {
   padding-inline: 0;
   font-weight: 600;
+  font-size: 13px;
 }
 
 :deep(.admin-mobile-table .ant-table-header) {
@@ -774,6 +782,8 @@ watch(filterSignature, async () => {
   color: var(--theme-title);
   font-weight: 700;
   border-bottom: 1px solid var(--theme-border);
+  padding: 11px 12px;
+  white-space: nowrap;
 }
 
 :deep(.admin-mobile-table .ant-table-body) {
