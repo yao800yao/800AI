@@ -10,9 +10,19 @@ from app.database import get_db
 from app.api.deps import get_current_user
 from app.models.user import User
 from app.config import settings
-from app.schemas.auth import LoginRequest, LoginResponse, RegisterRequest, UserBrief, ChangePasswordRequest, UpdateProfileRequest
+from app.schemas.auth import (
+    LoginRequest,
+    LoginResponse,
+    RegisterRequest,
+    UserBrief,
+    ChangePasswordRequest,
+    UpdateProfileRequest,
+    RedeemCreditKeyRequest,
+    RedeemCreditKeyResponse,
+)
 from app.services.business_id_service import get_user_by_business_id, user_external_id
 from app.services.auth_service import authenticate_user, change_password, register_user, update_username
+from app.services.credit_redeem_service import redeem_credit_key
 from app.models.prompt_history import PromptHistory
 from app.services.admin_service import get_credit_logs
 from app.services.user_credit_service import get_user_credit_balance
@@ -102,6 +112,15 @@ def get_me(user: User = Depends(get_current_user), db: Session = Depends(get_db)
     return _user_brief(db, user)
 
 
+@router.post("/redeem-key", response_model=RedeemCreditKeyResponse)
+def redeem_key(
+    body: RedeemCreditKeyRequest,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    return redeem_credit_key(db, redeem_key=body.key, user=user)
+
+
 @router.put("/profile", response_model=UserBrief)
 def update_profile(
     body: UpdateProfileRequest,
@@ -130,7 +149,7 @@ def my_credit_logs(
     start_date: Optional[datetime] = Query(None),
     end_date: Optional[datetime] = Query(None),
     direction: Optional[str] = Query(None, pattern="^(increase|decrease)$"),
-    mode: Optional[str] = Query(None, pattern="^(generate|inpaint|promptReverse|manual)$"),
+    mode: Optional[str] = Query(None, pattern="^(generate|inpaint|promptReverse|manual|redeem)$"),
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):

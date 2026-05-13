@@ -71,6 +71,12 @@ const router = createRouter({
           component: () => import("@/views/admin/UserManageView.vue"),
         },
         {
+          path: "admin/redeem-keys",
+          name: "RedeemKeyManage",
+          meta: { requiresAdmin: true },
+          component: () => import("@/views/admin/RedeemKeyManageView.vue"),
+        },
+        {
           path: "admin/dashboard",
           name: "Dashboard",
           meta: { requiresAdmin: true },

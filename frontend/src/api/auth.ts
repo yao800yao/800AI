@@ -1,5 +1,12 @@
 import client from "./client";
-import type { LoginResponse, UserInfo, CreditLog, AnnouncementConfig, PromptHistoryItem } from "@/types";
+import type {
+  LoginResponse,
+  UserInfo,
+  CreditLog,
+  AnnouncementConfig,
+  PromptHistoryItem,
+  RedeemCreditResult,
+} from "@/types";
 
 export function login(account: string, password: string): Promise<LoginResponse> {
   return client.post("/auth/login", {
@@ -22,6 +29,10 @@ export function changePassword(oldPassword: string, newPassword: string): Promis
 
 export function getMe(): Promise<UserInfo> {
   return client.get("/auth/me");
+}
+
+export function redeemCreditKey(key: string): Promise<RedeemCreditResult> {
+  return client.post("/auth/redeem-key", { key });
 }
 
 export function updateProfile(payload: { username: string }): Promise<UserInfo> {
@@ -51,7 +62,7 @@ export function getCreditLogs(params: {
   start_date?: string;
   end_date?: string;
   direction?: "increase" | "decrease";
-  mode?: "generate" | "inpaint" | "promptReverse" | "manual";
+  mode?: "generate" | "inpaint" | "promptReverse" | "manual" | "redeem";
 }): Promise<{ total: number; items: CreditLog[] }> {
   return client.get("/auth/credit-logs", { params });
 }

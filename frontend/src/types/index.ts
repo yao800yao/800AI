@@ -224,11 +224,44 @@ export interface CreditLog {
   username: string;
   amount: number;
   type: "allocate" | "consume";
-  mode: TaskMode | "manual";
+  mode: TaskMode | "manual" | "redeem";
   description: string;
   operator_name: string;
   task_id?: string;
   created_at: string;
+}
+
+export type RedeemKeyStatus = "enabled" | "disabled";
+
+export interface RedeemCreditResult {
+  message: string;
+  credit_amount: number;
+  credits: number;
+  redeem_key: string;
+  used_at?: string | null;
+}
+
+export interface AdminRedeemKey {
+  id: number;
+  redeem_key: string;
+  credit_amount: number;
+  batch_no: string;
+  status: RedeemKeyStatus;
+  is_used: boolean;
+  used_at?: string | null;
+  used_by_user_id?: string | null;
+  used_by_username: string;
+  used_by_user_email: string;
+  created_by_user_id?: string | null;
+  created_by_username: string;
+  created_at?: string | null;
+}
+
+export interface AdminRedeemKeyBatchResult {
+  batch_no: string;
+  credit_amount: number;
+  count: number;
+  items: AdminRedeemKey[];
 }
 
 export interface TemplateTag {

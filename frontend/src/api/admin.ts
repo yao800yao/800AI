@@ -9,6 +9,9 @@ import type {
   CosConfig,
   AdminUser,
   CreditLog,
+  AdminRedeemKey,
+  AdminRedeemKeyBatchResult,
+  RedeemKeyStatus,
   ExternalApiConfig,
   ExternalApiConfigPayload,
   ExternalApiSecretConfig,
@@ -79,7 +82,7 @@ export function getCreditLogs(
   startDate?: string,
   endDate?: string,
   direction?: "increase" | "decrease",
-  mode?: "generate" | "inpaint" | "promptReverse" | "manual",
+  mode?: "generate" | "inpaint" | "promptReverse" | "manual" | "redeem",
 ): Promise<{ total: number; items: CreditLog[] }> {
   const params: Record<string, unknown> = { page, page_size: pageSize };
   if (userId) params.user_id = userId;
@@ -88,6 +91,30 @@ export function getCreditLogs(
   if (direction) params.direction = direction;
   if (mode) params.mode = mode;
   return client.get("/admin/credit-logs", { params });
+}
+
+export function createRedeemKeysBatch(count: number, creditAmount: number): Promise<AdminRedeemKeyBatchResult> {
+  return client.post("/admin/redeem-keys/batch", {
+    count,
+    credit_amount: creditAmount,
+  });
+}
+
+export function listRedeemKeys(params: {
+  page?: number;
+  page_size?: number;
+  batch_no?: string;
+  redeem_key?: string;
+  credit_amount?: number;
+  status?: RedeemKeyStatus;
+  is_used?: boolean;
+  used_by?: string;
+}): Promise<{ total: number; items: AdminRedeemKey[] }> {
+  return client.get("/admin/redeem-keys", { params });
+}
+
+export function updateRedeemKeyStatus(keyId: number, status: RedeemKeyStatus): Promise<AdminRedeemKey> {
+  return client.post(`/admin/redeem-keys/${keyId}/status`, { status });
 }
 
 export function getStats(): Promise<AdminStats> {

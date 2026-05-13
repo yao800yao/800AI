@@ -1,3 +1,5 @@
+from datetime import datetime
+
 from pydantic import BaseModel
 
 
@@ -36,3 +38,15 @@ class ChangePasswordRequest(BaseModel):
 
 class UpdateProfileRequest(BaseModel):
     username: str
+
+
+class RedeemCreditKeyRequest(BaseModel):
+    key: str
+
+
+class RedeemCreditKeyResponse(BaseModel):
+    message: str
+    credit_amount: int
+    credits: int
+    redeem_key: str
+    used_at: datetime | None = None

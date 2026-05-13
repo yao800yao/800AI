@@ -272,7 +272,7 @@ function formatUserId(id?: string) {
 async function copyUserId(id: string) {
   try {
     await navigator.clipboard.writeText(id);
-    message.success("用户 ID 已复制");
+    message.success("内容已复制");
   } catch {
     message.error("复制失败，请重试");
   }

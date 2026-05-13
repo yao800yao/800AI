@@ -219,6 +219,8 @@ def _resolve_credit_log_mode(log: CreditLog, task_modes: dict[int, str]) -> str:
         return task_modes[log.task_id]
     if log.description == PROMPT_REVERSE_CREDIT_LOG_DESCRIPTION:
         return PROMPT_REVERSE_MODE
+    if (log.description or "").startswith("兑换积分码 "):
+        return "redeem"
     return "manual"
 
 

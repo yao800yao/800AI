@@ -31,6 +31,38 @@ class ResetCreditsRequest(BaseModel):
     description: str = ""
 
 
+class CreateRedeemKeysBatchRequest(BaseModel):
+    count: int
+    credit_amount: int
+
+
+class UpdateRedeemKeyStatusRequest(BaseModel):
+    status: str
+
+
+class RedeemKeyOut(BaseModel):
+    id: int
+    redeem_key: str
+    credit_amount: int
+    batch_no: str
+    status: str
+    is_used: bool
+    used_at: datetime | None = None
+    used_by_user_id: str | None = None
+    used_by_username: str = ""
+    used_by_user_email: str = ""
+    created_by_user_id: str | None = None
+    created_by_username: str = ""
+    created_at: datetime | None = None
+
+
+class RedeemKeyBatchOut(BaseModel):
+    batch_no: str
+    credit_amount: int
+    count: int
+    items: list[RedeemKeyOut]
+
+
 class CreditLogOut(BaseModel):
     id: int
     user_id: str

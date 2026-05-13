@@ -1,0 +1,502 @@
+<script setup lang="ts">
+import { ref, reactive, onMounted } from "vue";
+import { message } from "ant-design-vue";
+import { CopyOutlined, GiftOutlined } from "@ant-design/icons-vue";
+import { createRedeemKeysBatch, listRedeemKeys, updateRedeemKeyStatus } from "@/api/admin";
+import type { AdminRedeemKey, AdminRedeemKeyBatchResult, RedeemKeyStatus } from "@/types";
+
+const loading = ref(false);
+const generating = ref(false);
+const statusLoadingId = ref<number | null>(null);
+const latestBatch = ref<AdminRedeemKeyBatchResult | null>(null);
+const items = ref<AdminRedeemKey[]>([]);
+
+const batchForm = reactive({
+  count: 10,
+  creditAmount: 10,
+});
+
+const filters = reactive({
+  batchNo: "",
+  redeemKey: "",
+  creditAmount: undefined as number | undefined,
+  status: undefined as RedeemKeyStatus | undefined,
+  isUsed: undefined as boolean | undefined,
+  usedBy: "",
+});
+
+const pagination = reactive({
+  page: 1,
+  pageSize: 20,
+  total: 0,
+});
+
+const columns = [
+  { title: "批次", dataIndex: "batch_no", width: 170 },
+  { title: "兑换码", dataIndex: "redeem_key", width: 190 },
+  { title: "积分值", dataIndex: "credit_amount", width: 88 },
+  { title: "状态", dataIndex: "status", width: 90 },
+  { title: "是否已使用", dataIndex: "is_used", width: 100 },
+  { title: "使用人", dataIndex: "used_by_username", width: 220 },
+  { title: "使用时间", dataIndex: "used_at", width: 170 },
+  { title: "操作", key: "action", width: 120 },
+];
+
+async function load() {
+  loading.value = true;
+  try {
+    const res = await listRedeemKeys({
+      page: pagination.page,
+      page_size: pagination.pageSize,
+      batch_no: filters.batchNo.trim() || undefined,
+      redeem_key: filters.redeemKey.trim() || undefined,
+      credit_amount: filters.creditAmount,
+      status: filters.status,
+      is_used: filters.isUsed,
+      used_by: filters.usedBy.trim() || undefined,
+    });
+    items.value = res.items;
+    pagination.total = res.total;
+  } catch (err: any) {
+    message.error(err.response?.data?.detail || "获取兑换码列表失败");
+  } finally {
+    loading.value = false;
+  }
+}
+
+onMounted(load);
+
+async function handleCreateBatch() {
+  if (!batchForm.count || batchForm.count <= 0) {
+    message.warning("请输入有效的生成数量");
+    return;
+  }
+  if (!batchForm.creditAmount || batchForm.creditAmount <= 0) {
+    message.warning("请输入有效的积分值");
+    return;
+  }
+  generating.value = true;
+  try {
+    latestBatch.value = await createRedeemKeysBatch(batchForm.count, batchForm.creditAmount);
+    message.success(`已生成 ${latestBatch.value.count} 个兑换码`);
+    pagination.page = 1;
+    await load();
+  } catch (err: any) {
+    message.error(err.response?.data?.detail || "生成兑换码失败");
+  } finally {
+    generating.value = false;
+  }
+}
+
+function handleFilter() {
+  pagination.page = 1;
+  load();
+}
+
+function handleReset() {
+  filters.batchNo = "";
+  filters.redeemKey = "";
+  filters.creditAmount = undefined;
+  filters.status = undefined;
+  filters.isUsed = undefined;
+  filters.usedBy = "";
+  pagination.page = 1;
+  load();
+}
+
+function handlePageChange(page: number, pageSize?: number) {
+  pagination.page = page;
+  if (pageSize) pagination.pageSize = pageSize;
+  load();
+}
+
+async function handleCopy(text: string, successText = "内容已复制") {
+  try {
+    await navigator.clipboard.writeText(text);
+    message.success(successText);
+  } catch {
+    message.error("复制失败，请重试");
+  }
+}
+
+async function copyLatestBatch() {
+  const keys = latestBatch.value?.items?.map((item) => item.redeem_key).join("\n");
+  if (!keys) {
+    message.warning("暂无可复制的兑换码");
+    return;
+  }
+  await handleCopy(keys, "兑换码已复制");
+}
+
+async function toggleStatus(item: AdminRedeemKey) {
+  if (item.is_used) return;
+  const nextStatus: RedeemKeyStatus = item.status === "enabled" ? "disabled" : "enabled";
+  statusLoadingId.value = item.id;
+  try {
+    await updateRedeemKeyStatus(item.id, nextStatus);
+    message.success(nextStatus === "enabled" ? "兑换码已启用" : "兑换码已禁用");
+    await load();
+  } catch (err: any) {
+    message.error(err.response?.data?.detail || "兑换码状态更新失败");
+  } finally {
+    statusLoadingId.value = null;
+  }
+}
+
+function fmtTime(t?: string | null) {
+  return t ? new Date(t).toLocaleString("zh-CN") : "-";
+}
+</script>
+
+<template>
+  <div class="warm-page motion-page-enter">
+    <div class="warm-page-header motion-fade-up" style="--motion-delay: 40ms">
+      <div class="warm-page-heading">
+        <div class="warm-page-icon">
+          <GiftOutlined />
+        </div>
+        <div>
+          <div class="warm-page-title">兑换码管理</div>
+          <div class="warm-page-desc">支持批量生成积分兑换码、查看是否已使用，并对未使用兑换码执行启用或禁用。</div>
+        </div>
+      </div>
+      <div class="header-actions">
+        <a-form layout="inline" class="redeem-create-form">
+          <a-form-item label="生成数量">
+            <a-input-number v-model:value="batchForm.count" :min="1" :max="1000" class="warm-input-number redeem-half-number" />
+          </a-form-item>
+          <a-form-item label="每个积分">
+            <a-input-number v-model:value="batchForm.creditAmount" :min="1" class="warm-input-number redeem-half-number" />
+          </a-form-item>
+          <a-button type="primary" class="warm-primary-btn action-btn" :loading="generating" @click="handleCreateBatch">
+            批量生成
+          </a-button>
+          <a-button class="filter-reset-btn action-btn" @click="copyLatestBatch">复制最近一批</a-button>
+        </a-form>
+      </div>
+    </div>
+
+    <div v-if="latestBatch" class="warm-card redeem-batch-summary-card motion-fade-up motion-card-lift" style="--motion-delay: 120ms">
+      <div class="redeem-batch-summary">
+        最近批次：{{ latestBatch.batch_no }}，共 {{ latestBatch.count }} 个，每个 {{ latestBatch.credit_amount }} 积分
+      </div>
+    </div>
+
+    <div class="warm-card redeem-filter-bar motion-fade-up motion-card-lift" style="--motion-delay: 180ms">
+      <a-input
+        v-model:value="filters.batchNo"
+        allow-clear
+        placeholder="按批次号筛选"
+        class="warm-input redeem-filter-input"
+      />
+      <a-input
+        v-model:value="filters.redeemKey"
+        allow-clear
+        placeholder="按兑换码筛选"
+        class="warm-input redeem-filter-input"
+      />
+      <a-input-number
+        v-model:value="filters.creditAmount"
+        :min="1"
+        placeholder="按积分值筛选"
+        class="warm-input-number redeem-filter-number"
+      />
+      <a-select
+        v-model:value="filters.status"
+        allow-clear
+        placeholder="兑换码状态"
+        class="warm-select redeem-filter-select"
+      >
+        <a-select-option value="enabled">启用</a-select-option>
+        <a-select-option value="disabled">禁用</a-select-option>
+      </a-select>
+      <a-select
+        v-model:value="filters.isUsed"
+        allow-clear
+        placeholder="使用状态"
+        class="warm-select redeem-filter-select"
+      >
+        <a-select-option :value="true">已使用</a-select-option>
+        <a-select-option :value="false">未使用</a-select-option>
+      </a-select>
+      <a-input
+        v-model:value="filters.usedBy"
+        allow-clear
+        placeholder="按使用人/邮箱筛选"
+        class="warm-input redeem-filter-input"
+      />
+      <a-button type="primary" class="warm-primary-btn action-btn" @click="handleFilter">筛选</a-button>
+      <a-button class="filter-reset-btn action-btn" @click="handleReset">重置</a-button>
+    </div>
+
+    <div class="warm-card warm-table-card motion-fade-up motion-card-lift" style="--motion-delay: 240ms">
+      <a-table
+        :columns="columns"
+        :data-source="items"
+        :loading="loading"
+        :pagination="false"
+        row-key="id"
+        :scroll="{ x: 980 }"
+        class="admin-mobile-table"
+      >
+        <template #bodyCell="{ column, record }">
+          <template v-if="column.dataIndex === 'batch_no'">
+            <span class="batch-no-text">{{ record.batch_no }}</span>
+          </template>
+          <template v-else-if="column.dataIndex === 'redeem_key'">
+            <div class="id-cell">
+              <span class="redeem-key-text">{{ record.redeem_key }}</span>
+              <a-button type="text" size="small" class="id-copy-btn" @click="handleCopy(record.redeem_key)">
+                <template #icon><CopyOutlined /></template>
+              </a-button>
+            </div>
+          </template>
+          <template v-else-if="column.dataIndex === 'credit_amount'">
+            <span class="credit-amount">{{ record.credit_amount }}</span>
+          </template>
+          <template v-else-if="column.dataIndex === 'status'">
+            <a-tag class="warm-tag" :class="record.status === 'enabled' ? 'warm-tag-whitelist' : 'warm-tag-muted'">
+              {{ record.status === "enabled" ? "启用" : "禁用" }}
+            </a-tag>
+          </template>
+          <template v-else-if="column.dataIndex === 'is_used'">
+            <a-tag class="warm-tag" :class="record.is_used ? 'warm-tag-role-admin' : 'warm-tag-muted'">
+              {{ record.is_used ? "已使用" : "未使用" }}
+            </a-tag>
+          </template>
+          <template v-else-if="column.dataIndex === 'used_by_username'">
+            <div v-if="record.used_by_username || record.used_by_user_email" class="used-user-cell">
+              <span>{{ record.used_by_username || "-" }}</span>
+              <span v-if="record.used_by_user_email" class="used-user-email">{{ record.used_by_user_email }}</span>
+            </div>
+            <span v-else>-</span>
+          </template>
+          <template v-else-if="column.dataIndex === 'used_at'">
+            {{ fmtTime(record.used_at) }}
+          </template>
+          <template v-else-if="column.key === 'action'">
+            <a-button
+              type="link"
+              size="small"
+              class="user-action-btn"
+              :class="record.status === 'enabled' ? 'user-action-btn-danger' : 'user-action-btn-secondary'"
+              :danger="record.status === 'enabled'"
+              :disabled="record.is_used"
+              :loading="statusLoadingId === record.id"
+              @click="toggleStatus(record)"
+            >
+              {{ record.status === "enabled" ? "禁用" : "启用" }}
+            </a-button>
+          </template>
+        </template>
+      </a-table>
+    </div>
+
+    <div class="warm-pagination">
+      <div class="pagination-summary">共 {{ pagination.total }} 个兑换码</div>
+      <a-pagination
+        v-if="pagination.total > pagination.pageSize"
+        :current="pagination.page"
+        :total="pagination.total"
+        :page-size="pagination.pageSize"
+        show-size-changer
+        @change="handlePageChange"
+        @showSizeChange="handlePageChange"
+      />
+    </div>
+  </div>
+</template>
+
+<style scoped lang="scss">
+.header-actions,
+.redeem-filter-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.redeem-create-form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  justify-content: flex-end;
+}
+
+.redeem-batch-summary-card {
+  padding: 16px 20px;
+  margin-bottom: 16px;
+}
+
+.redeem-batch-summary {
+  color: #8c7458;
+  font-size: 14px;
+}
+
+.redeem-filter-bar {
+  padding: 16px 20px;
+  margin-bottom: 16px;
+}
+
+.redeem-filter-input {
+  width: 196px;
+}
+
+.redeem-half-number {
+  width: 112px;
+}
+
+.redeem-filter-number {
+  width: 156px;
+}
+
+.redeem-filter-select {
+  width: 128px;
+}
+
+.action-btn {
+  min-width: 96px;
+  height: 36px;
+}
+
+.pagination-summary {
+  color: #8c7458;
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+.id-cell {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  max-width: 100%;
+}
+
+.id-copy-btn {
+  width: 24px;
+  min-width: 24px;
+  height: 24px;
+  padding: 0 !important;
+  color: #b16d10 !important;
+}
+
+.redeem-key-text {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  font-size: 12px;
+  font-weight: 700;
+  color: #8c7458;
+}
+
+.batch-no-text {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  font-size: 12px;
+  font-weight: 700;
+  color: #8c7458;
+}
+
+.credit-amount {
+  font-weight: 700;
+  color: #d48806;
+}
+
+.used-user-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.used-user-email {
+  color: #8c7458;
+  font-size: 12px;
+  word-break: break-all;
+}
+
+.user-action-btn {
+  height: 30px;
+  padding-inline: 6px;
+  border-radius: 9px;
+  font-weight: 600;
+  font-size: 12px;
+  margin: 0;
+}
+
+.user-action-btn.user-action-btn-secondary {
+  color: #a9772e !important;
+  background: #fff8ee !important;
+}
+
+.user-action-btn.user-action-btn-danger {
+  color: #d6574b !important;
+  background: #fff1ef !important;
+}
+
+.warm-tag {
+  border-radius: 999px;
+  border-width: 1px;
+  font-weight: 600;
+}
+
+.warm-tag-role-admin {
+  color: #c7770d;
+  background: #fff4df;
+  border-color: #efc784;
+}
+
+.warm-tag-whitelist {
+  color: #b16d10;
+  background: #fff1d9;
+  border-color: #efc784;
+}
+
+.warm-tag-muted {
+  color: #8f7558;
+  background: #fffaf2;
+  border-color: #f2e3c6;
+}
+
+.filter-reset-btn {
+  height: 36px;
+  border-radius: 12px;
+  border: 1px solid #efc784 !important;
+  background: #fff7e8 !important;
+  color: #b16d10 !important;
+}
+
+.filter-reset-btn:hover {
+  border-color: #e1a64a !important;
+  background: #fff0d3 !important;
+  color: #c7770d !important;
+}
+
+:deep(.admin-mobile-table .ant-table-thead > tr > th) {
+  padding: 11px 12px;
+  white-space: nowrap;
+}
+
+:deep(.admin-mobile-table .ant-table-tbody > tr > td) {
+  padding: 8px 12px;
+}
+
+@media (max-width: 768px) {
+  .header-actions,
+  .redeem-filter-bar {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .redeem-create-form {
+    justify-content: stretch;
+  }
+
+  .redeem-filter-input,
+  .redeem-half-number,
+  .redeem-filter-number,
+  .redeem-filter-select {
+    width: 100%;
+  }
+
+  :deep(.admin-mobile-table .ant-table-content) {
+    overflow-x: auto !important;
+  }
+}
+</style>

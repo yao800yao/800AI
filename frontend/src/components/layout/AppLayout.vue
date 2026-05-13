@@ -9,6 +9,7 @@ import {
   getMe,
   getContactConfig,
   getAnnouncementConfig,
+  redeemCreditKey,
 } from "@/api/auth";
 import { registerCloudbaseAccount, sendRegisterEmailCode } from "@/lib/cloudbase";
 import { withBaseUrl } from "@/lib/assets";
@@ -31,6 +32,7 @@ import {
   MenuOutlined,
   MailOutlined,
   MessageOutlined,
+  GiftOutlined,
 } from "@ant-design/icons-vue";
 
 const router = useRouter();
@@ -53,12 +55,13 @@ const routeOrder = new Map<string, number>([
   ["/feedbacks/:feedbackId", 8],
   ["/admin/templates", 9],
   ["/admin/users", 10],
-  ["/admin/dashboard", 11],
-  ["/admin/feedbacks", 12],
-  ["/admin/feedbacks/:feedbackId", 13],
-  ["/admin/api-key", 14],
-  ["/admin/cos-config", 15],
-  ["/admin/external-api-configs", 16],
+  ["/admin/redeem-keys", 11],
+  ["/admin/dashboard", 12],
+  ["/admin/feedbacks", 13],
+  ["/admin/feedbacks/:feedbackId", 14],
+  ["/admin/api-key", 15],
+  ["/admin/cos-config", 16],
+  ["/admin/external-api-configs", 17],
 ]);
 
 const currentTheme = ref<AppThemeName>(getCurrentTheme());
@@ -81,6 +84,7 @@ const adminMenuItems = computed(() =>
   [
     { key: "/admin/templates", label: "模版管理", icon: PictureOutlined, superAdminOnly: false },
     { key: "/admin/users", label: "用户管理", icon: TeamOutlined, superAdminOnly: false },
+    { key: "/admin/redeem-keys", label: "兑换码管理", icon: GiftOutlined, superAdminOnly: false },
     { key: "/admin/dashboard", label: "数据统计", icon: BarChartOutlined, superAdminOnly: false },
     { key: "/admin/feedbacks", label: "用户 Feedback", icon: MessageOutlined, superAdminOnly: false },
     { key: "/admin/cos-config", label: "COS 配置", icon: CloudUploadOutlined, superAdminOnly: true },
@@ -166,6 +170,9 @@ const loginLoading = ref(false);
 const registerForm = reactive({ email: "", verificationCode: "", username: "", password: "", confirmPassword: "" });
 const registerLoading = ref(false);
 const registerCodeLoading = ref(false);
+const redeemDialogOpen = ref(false);
+const redeemLoading = ref(false);
+const redeemForm = reactive({ key: "" });
 
 function isValidEmail(email: string) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim());
@@ -274,6 +281,32 @@ async function handleRegisterSubmit() {
   }
 }
 
+async function handleRedeemCredits() {
+  const normalizedKey = redeemForm.key.trim().toUpperCase();
+  if (!normalizedKey) {
+    message.warning("请输入兑换码");
+    return;
+  }
+  redeemLoading.value = true;
+  try {
+    const res = await redeemCreditKey(normalizedKey);
+    try {
+      auth.updateUser(await getMe());
+    } catch {
+      if (auth.user) {
+        auth.updateUser({ ...auth.user, credits: res.credits });
+      }
+    }
+    message.success(`兑换成功，已到账 ${res.credit_amount} 积分`);
+    redeemDialogOpen.value = false;
+    redeemForm.key = "";
+  } catch (err: any) {
+    message.error(err.response?.data?.detail || "兑换失败");
+  } finally {
+    redeemLoading.value = false;
+  }
+}
+
 const creditsContactVisible = ref(false);
 const contactQrImage = ref("");
 const announcementVisible = ref(false);
@@ -371,6 +404,15 @@ function openCreditsContact() {
 
 provide("openCreditsContact", openCreditsContact);
 
+function openRedeemEntry() {
+  mobileDrawerOpen.value = false;
+  if (!auth.isLoggedIn) {
+    openAuthModal("login");
+    return;
+  }
+  redeemDialogOpen.value = true;
+}
+
 function goCreditLogs() {
   mobileDrawerOpen.value = false;
   router.push("/credit-logs");
@@ -393,17 +435,22 @@ watch(
   <a-layout class="app-layout">
     <a-layout-header class="app-header">
       <div class="header-inner">
-        <div class="header-brand" @click="router.push('/')">
-          <div class="brand-mark">🍌</div>
-          <div class="brand-copy">
-            <span class="brand-name">80AI</span>
-            <span class="brand-sub">AI Creative Studio</span>
+        <div class="header-brand-wrap">
+          <div class="header-brand" @click="router.push('/')">
+            <div class="brand-mark">🍌</div>
+            <div class="brand-copy">
+              <span class="brand-name">80AI</span>
+              <span class="brand-sub">AI Creative Studio</span>
+            </div>
           </div>
+          <a-button type="text" class="top-link-btn" @click="openCreditsContact">
+            联系我们
+          </a-button>
         </div>
 
         <div class="mobile-nav-entry">
-          <a-button type="text" class="mobile-nav-contact-btn" @click="openCreditsContact">
-            联系我们
+          <a-button type="text" class="mobile-nav-contact-btn" @click="openRedeemEntry">
+            兑换积分
           </a-button>
           <div v-if="auth.isLoggedIn" class="mobile-nav-credits" @click="goCreditLogs">
             <ThunderboltOutlined />
@@ -427,8 +474,8 @@ watch(
         </a-menu>
 
         <div class="header-actions">
-          <a-button type="text" class="header-contact-btn" @click="openCreditsContact">
-            联系我们
+          <a-button type="text" class="top-link-btn" @click="openRedeemEntry">
+            兑换积分
           </a-button>
           <template v-if="auth.isLoggedIn">
             <a-dropdown v-if="isAdmin" :trigger="['hover']" overlay-class-name="warm-dropdown">
@@ -656,6 +703,31 @@ watch(
     </a-modal>
 
     <a-modal
+      v-model:open="redeemDialogOpen"
+      title="兑换积分"
+      :confirm-loading="redeemLoading"
+      :ok-button-props="{ class: 'warm-primary-btn' }"
+      :cancel-button-props="{ class: 'warm-secondary-btn' }"
+      ok-text="立即兑换"
+      cancel-text="取消"
+      centered
+      :width="420"
+      @ok="handleRedeemCredits"
+    >
+      <a-form layout="vertical" style="margin-top: 16px">
+        <a-form-item label="兑换码" style="margin-bottom: 0">
+          <a-input
+            v-model:value="redeemForm.key"
+            class="warm-input"
+            :maxlength="16"
+            placeholder="请输入 16 位兑换码"
+            @press-enter="handleRedeemCredits"
+          />
+        </a-form-item>
+      </a-form>
+    </a-modal>
+
+    <a-modal
       v-model:open="loginModalVisible"
       :title="null"
       :footer="null"
@@ -819,6 +891,13 @@ watch(
   background: transparent;
 }
 
+.header-brand-wrap {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 0 0 auto;
+}
+
 .header-brand {
   display: flex;
   align-items: center;
@@ -859,6 +938,22 @@ watch(
   letter-spacing: 0.08em;
   text-transform: uppercase;
   color: var(--theme-subtitle);
+}
+
+.top-link-btn {
+  height: 40px !important;
+  padding-inline: 12px !important;
+  font-weight: 700 !important;
+  color: var(--theme-text-secondary) !important;
+  border-radius: 999px !important;
+}
+
+.top-link-btn:hover,
+.top-link-btn:focus {
+  color: var(--theme-nav-hover-text) !important;
+  background: var(--theme-nav-hover-bg) !important;
+  border-color: transparent !important;
+  box-shadow: none !important;
 }
 
 .header-menu {
@@ -1201,19 +1296,6 @@ html:is([data-theme="dark"], [data-theme="midnight"]) .warm-dropdown .ant-dropdo
   color: var(--theme-title);
 }
 
-.header-contact-btn {
-  height: 40px !important;
-  padding-inline: 12px !important;
-  font-weight: 700 !important;
-  color: var(--theme-text-secondary) !important;
-  border-radius: 999px !important;
-
-  &:hover {
-    color: var(--theme-nav-hover-text) !important;
-    background: var(--theme-nav-hover-bg) !important;
-  }
-}
-
 .credits-badge {
   display: inline-flex;
   align-items: center;
@@ -1510,6 +1592,14 @@ html:is([data-theme="dark"], [data-theme="midnight"]) .warm-dropdown .ant-dropdo
 
   .header-brand {
     margin-right: 0;
+  }
+
+  .header-brand-wrap {
+    gap: 8px;
+  }
+
+  .top-link-btn {
+    display: none;
   }
 
   .header-menu {

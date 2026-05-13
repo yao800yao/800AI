@@ -9,6 +9,7 @@ from app.models.user import User
 from app.schemas.admin import (
     CreateUserRequest, UserOut, UpdateStatusRequest, UpdateRoleRequest,
     UpdateWhitelistRequest, ResetPasswordRequest, StatsOut, AllocateCreditsRequest, ResetCreditsRequest, CreditLogOut,
+    CreateRedeemKeysBatchRequest, RedeemKeyBatchOut, RedeemKeyOut, UpdateRedeemKeyStatusRequest,
     AnalyticsSummaryOut, AnalyticsTimeseriesOut, AnalyticsBreakdownOut,
 )
 from app.schemas.feedback import FeedbackDetail, FeedbackListResponse, FeedbackUpdateRequest
@@ -19,6 +20,7 @@ from app.services.admin_service import (
     update_user_whitelist, reset_user_password, get_stats, allocate_credits, reset_user_credits, get_credit_logs,
     get_analytics_summary, get_analytics_timeseries, get_analytics_breakdown,
 )
+from app.services.credit_redeem_service import create_redeem_key_batch, list_redeem_keys, update_redeem_key_status
 from app.services.feedback_service import get_feedback_detail, list_feedbacks, update_feedback
 from app.services.history_service import get_admin_history_detail, get_all_history
 
@@ -111,6 +113,51 @@ def admin_reset_credits(
     return reset_user_credits(db, user_id, body.description, admin.id)
 
 
+@router.post("/redeem-keys/batch", response_model=RedeemKeyBatchOut)
+def admin_create_redeem_keys_batch(
+    body: CreateRedeemKeysBatchRequest,
+    admin: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    return create_redeem_key_batch(db, count=body.count, credit_amount=body.credit_amount, admin_user=admin)
+
+
+@router.get("/redeem-keys", response_model=dict)
+def admin_list_redeem_keys(
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=200),
+    batch_no: Optional[str] = Query(None),
+    redeem_key: Optional[str] = Query(None),
+    credit_amount: Optional[int] = Query(None, ge=1),
+    status_filter: Optional[str] = Query(None, alias="status", pattern="^(enabled|disabled)$"),
+    is_used: Optional[bool] = Query(None),
+    used_by: Optional[str] = Query(None),
+    _user: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    return list_redeem_keys(
+        db,
+        page=page,
+        page_size=page_size,
+        batch_no=batch_no,
+        redeem_key=redeem_key,
+        credit_amount=credit_amount,
+        status_filter=status_filter,
+        is_used=is_used,
+        used_by=used_by,
+    )
+
+
+@router.post("/redeem-keys/{key_id}/status", response_model=RedeemKeyOut)
+def admin_update_redeem_key_status(
+    key_id: int,
+    body: UpdateRedeemKeyStatusRequest,
+    _user: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    return update_redeem_key_status(db, key_id=key_id, new_status=body.status)
+
+
 @router.get("/credit-logs", response_model=dict)
 def admin_credit_logs(
     page: int = Query(1, ge=1),
@@ -119,7 +166,7 @@ def admin_credit_logs(
     start_date: Optional[datetime] = Query(None),
     end_date: Optional[datetime] = Query(None),
     direction: Optional[str] = Query(None, pattern="^(increase|decrease)$"),
-    mode: Optional[str] = Query(None, pattern="^(generate|inpaint|promptReverse|manual)$"),
+    mode: Optional[str] = Query(None, pattern="^(generate|inpaint|promptReverse|manual|redeem)$"),
     _user: User = Depends(require_admin),
     db: Session = Depends(get_db),
 ):

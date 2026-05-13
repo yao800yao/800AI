@@ -35,6 +35,7 @@
 - `user_id`: 归属用户。
 - `type`: 积分类型；当前默认使用 `0`，便于后续扩展其他余额类型。
 - `balance`: 当前积分余额快照。
+- `expire_time`: 积分过期时间；当前默认值为 `2027-12-30 23:59:59`。
 - `created_at` / `updated_at`: 账户创建时间、最后更新时间。
 - 使用联合唯一约束 `(user_id, type)` 保证同一用户同一积分类型只有一条余额记录。
 
@@ -89,6 +90,18 @@
 - `operator_id`: 操作人；管理员手工加减积分时会用到。
 - `task_id`: 关联任务；任务消费和返还时很关键。
 - `created_at`: 流水创建时间。
+
+### `credit_redeem_keys`
+
+- `id`: 兑换码主键。
+- `redeem_key`: 16 位兑换码，唯一。
+- `credit_amount`: 该兑换码可兑换的积分值。
+- `batch_no`: 批次号；同一批生成的兑换码共享同一个批次号。
+- `status`: 兑换码状态，当前常见值为 `enabled`、`disabled`。
+- `created_by`: 生成人；通常为管理员用户 ID。
+- `used_by_user_id`: 使用人；兑换成功后写入。
+- `used_at`: 兑换成功时间；为空表示尚未使用。
+- `created_at` / `updated_at`: 创建时间、最后更新时间。
 
 ### `prompt_history`
 
@@ -371,6 +384,7 @@ CREATE TABLE user_credits (
   user_id INT NOT NULL,
   type INT NOT NULL DEFAULT 0,
   balance INT NOT NULL DEFAULT 0,
+  expire_time DATETIME NOT NULL DEFAULT '2027-12-30 23:59:59',
   created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
   updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (id),
@@ -472,6 +486,28 @@ CREATE TABLE credit_logs (
   CONSTRAINT fk_credit_logs_task FOREIGN KEY (task_id) REFERENCES tasks (id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+CREATE TABLE credit_redeem_keys (
+  id INT NOT NULL AUTO_INCREMENT,
+  redeem_key VARCHAR(16) NOT NULL,
+  credit_amount INT NOT NULL DEFAULT 0,
+  batch_no VARCHAR(32) NOT NULL,
+  status VARCHAR(20) NOT NULL DEFAULT 'enabled',
+  created_by INT DEFAULT NULL,
+  used_by_user_id INT DEFAULT NULL,
+  used_at DATETIME DEFAULT NULL,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (id),
+  UNIQUE KEY uq_credit_redeem_keys_redeem_key (redeem_key),
+  KEY ix_credit_redeem_keys_redeem_key (redeem_key),
+  KEY ix_credit_redeem_keys_batch_no (batch_no),
+  KEY ix_credit_redeem_keys_status (status),
+  KEY ix_credit_redeem_keys_created_by (created_by),
+  KEY ix_credit_redeem_keys_used_by_user_id (used_by_user_id),
+  CONSTRAINT fk_credit_redeem_keys_created_by FOREIGN KEY (created_by) REFERENCES users (id),
+  CONSTRAINT fk_credit_redeem_keys_used_by_user_id FOREIGN KEY (used_by_user_id) REFERENCES users (id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 CREATE TABLE images (
   id INT NOT NULL AUTO_INCREMENT,
   task_id INT NOT NULL,
@@ -546,8 +582,8 @@ INSERT INTO users (
 ('11111111111111111111111111111111', 'administrator', NULL, 0, '$2b$12$CR1qnIGjLbi46hgFXXrxQOoPge5g0aWWuLga1fWGDC5GOBiIFY0vK', '', 'superadmin', 'active', 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
 ('22222222222222222222222222222222', 'admin', NULL, 0, '$2b$12$gGceM8aYPCpT9Kz0GJQvje0cvIS5y6HEFrXTGyeu4AzNbD7ANX..C', '', 'admin', 'active', 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP);
 
-INSERT INTO user_credits (user_id, type, balance, created_at, updated_at)
-SELECT id, 0, 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+INSERT INTO user_credits (user_id, type, balance, expire_time, created_at, updated_at)
+SELECT id, 0, 0, '2027-12-30 23:59:59', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
 FROM users
 WHERE business_id IN (
   '11111111111111111111111111111111',
@@ -587,6 +623,7 @@ CREATE TABLE IF NOT EXISTS user_credits (
   user_id INT NOT NULL,
   type INT NOT NULL DEFAULT 0,
   balance INT NOT NULL DEFAULT 0,
+  expire_time DATETIME NOT NULL DEFAULT '2027-12-30 23:59:59',
   created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
   updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (id),
@@ -596,8 +633,8 @@ CREATE TABLE IF NOT EXISTS user_credits (
   CONSTRAINT fk_user_credits_user FOREIGN KEY (user_id) REFERENCES users (id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
-INSERT INTO user_credits (user_id, type, balance, created_at, updated_at)
-SELECT u.id, 0, COALESCE(u.credits, 0), CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+INSERT INTO user_credits (user_id, type, balance, expire_time, created_at, updated_at)
+SELECT u.id, 0, COALESCE(u.credits, 0), '2027-12-30 23:59:59', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
 FROM users u
 LEFT JOIN user_credits uc
   ON uc.user_id = u.id
@@ -620,7 +657,8 @@ SELECT
   u.id,
   u.username,
   uc.type,
-  uc.balance
+  uc.balance,
+  uc.expire_time
 FROM users u
 LEFT JOIN user_credits uc
   ON uc.user_id = u.id
@@ -631,7 +669,83 @@ LIMIT 20;
 
 正常情况下，`credit_account_count` 应与需要保留余额账户的用户数量一致，且每个用户都应能查到一条 `type = 0` 的记录。
 
-### 4. 其它历史增量字段
+### 4. 兑换码功能对齐 SQL
+
+如果生产环境还没有兑换码功能，需要手动补齐 `credit_redeem_keys` 表。
+
+```sql
+CREATE TABLE IF NOT EXISTS credit_redeem_keys (
+  id INT NOT NULL AUTO_INCREMENT,
+  redeem_key VARCHAR(16) NOT NULL,
+  credit_amount INT NOT NULL DEFAULT 0,
+  batch_no VARCHAR(32) NOT NULL,
+  status VARCHAR(20) NOT NULL DEFAULT 'enabled',
+  created_by INT DEFAULT NULL,
+  used_by_user_id INT DEFAULT NULL,
+  used_at DATETIME DEFAULT NULL,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (id),
+  UNIQUE KEY uq_credit_redeem_keys_redeem_key (redeem_key),
+  KEY ix_credit_redeem_keys_redeem_key (redeem_key),
+  KEY ix_credit_redeem_keys_batch_no (batch_no),
+  KEY ix_credit_redeem_keys_status (status),
+  KEY ix_credit_redeem_keys_created_by (created_by),
+  KEY ix_credit_redeem_keys_used_by_user_id (used_by_user_id),
+  CONSTRAINT fk_credit_redeem_keys_created_by FOREIGN KEY (created_by) REFERENCES users (id),
+  CONSTRAINT fk_credit_redeem_keys_used_by_user_id FOREIGN KEY (used_by_user_id) REFERENCES users (id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+ALTER TABLE credit_redeem_keys
+  ADD COLUMN IF NOT EXISTS status VARCHAR(20) NOT NULL DEFAULT 'enabled' AFTER batch_no;
+
+ALTER TABLE credit_redeem_keys
+  ADD COLUMN IF NOT EXISTS created_by INT DEFAULT NULL AFTER status;
+
+ALTER TABLE credit_redeem_keys
+  ADD COLUMN IF NOT EXISTS used_by_user_id INT DEFAULT NULL AFTER created_by;
+
+ALTER TABLE credit_redeem_keys
+  ADD COLUMN IF NOT EXISTS used_at DATETIME DEFAULT NULL AFTER used_by_user_id;
+
+ALTER TABLE credit_redeem_keys
+  ADD COLUMN IF NOT EXISTS created_at DATETIME DEFAULT CURRENT_TIMESTAMP AFTER used_at;
+
+ALTER TABLE credit_redeem_keys
+  ADD COLUMN IF NOT EXISTS updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP AFTER created_at;
+
+UPDATE credit_redeem_keys
+SET status = 'enabled'
+WHERE status IS NULL OR status = '';
+```
+
+执行后可用以下 SQL 检查：
+
+```sql
+SHOW TABLES LIKE 'credit_redeem_keys';
+
+SHOW COLUMNS FROM credit_redeem_keys;
+
+SELECT
+  status,
+  COUNT(*) AS key_count
+FROM credit_redeem_keys
+GROUP BY status;
+
+SELECT
+  id,
+  redeem_key,
+  credit_amount,
+  batch_no,
+  status,
+  used_by_user_id,
+  used_at
+FROM credit_redeem_keys
+ORDER BY id DESC
+LIMIT 20;
+```
+
+### 5. 其它历史增量字段
 
 若生产库还缺旧版本字段 `tasks.is_deleted`，可继续执行：
 

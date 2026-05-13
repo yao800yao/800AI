@@ -87,6 +87,7 @@ def on_startup():
     if settings.DB_AUTO_CREATE_TABLES:
         Base.metadata.create_all(bind=engine)
     _ensure_user_credit_schema()
+    _ensure_credit_redeem_key_schema()
     _drop_legacy_user_credits_column()
     _ensure_user_whitelist_column()
     _ensure_user_identity_schema()
@@ -440,6 +441,7 @@ def _ensure_user_credit_schema():
                         user_id INTEGER NOT NULL,
                         type INTEGER NOT NULL DEFAULT 0,
                         balance INTEGER NOT NULL DEFAULT 0,
+                        expire_time DATETIME NOT NULL DEFAULT '2027-12-30 23:59:59',
                         created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
                         updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
                         PRIMARY KEY (id),
@@ -453,14 +455,34 @@ def _ensure_user_credit_schema():
             )
         inspector = inspect(engine)
 
+    user_credit_columns = {col["name"] for col in inspector.get_columns("user_credits")}
     user_columns = {col["name"] for col in inspector.get_columns("users")}
     with engine.begin() as conn:
+        if "expire_time" not in user_credit_columns:
+            conn.execute(
+                text(
+                    """
+                    ALTER TABLE user_credits
+                    ADD COLUMN expire_time DATETIME NOT NULL DEFAULT '2027-12-30 23:59:59'
+                    AFTER balance
+                    """
+                )
+            )
+            conn.execute(
+                text(
+                    """
+                    UPDATE user_credits
+                    SET expire_time = '2027-12-30 23:59:59'
+                    WHERE expire_time IS NULL
+                    """
+                )
+            )
         if "credits" in user_columns:
             conn.execute(
                 text(
                     """
-                    INSERT INTO user_credits (user_id, type, balance, created_at, updated_at)
-                    SELECT users.id, 0, COALESCE(users.credits, 0), NOW(), NOW()
+                    INSERT INTO user_credits (user_id, type, balance, expire_time, created_at, updated_at)
+                    SELECT users.id, 0, COALESCE(users.credits, 0), '2027-12-30 23:59:59', NOW(), NOW()
                     FROM users
                     LEFT JOIN user_credits
                       ON user_credits.user_id = users.id
@@ -473,8 +495,8 @@ def _ensure_user_credit_schema():
             conn.execute(
                 text(
                     """
-                    INSERT INTO user_credits (user_id, type, balance, created_at, updated_at)
-                    SELECT users.id, 0, 0, NOW(), NOW()
+                    INSERT INTO user_credits (user_id, type, balance, expire_time, created_at, updated_at)
+                    SELECT users.id, 0, 0, '2027-12-30 23:59:59', NOW(), NOW()
                     FROM users
                     LEFT JOIN user_credits
                       ON user_credits.user_id = users.id
@@ -483,6 +505,66 @@ def _ensure_user_credit_schema():
                     """
                 )
             )
+
+
+def _ensure_credit_redeem_key_schema():
+    inspector = inspect(engine)
+    table_names = set(inspector.get_table_names())
+    if "users" not in table_names:
+        return
+
+    if "credit_redeem_keys" not in table_names:
+        with engine.begin() as conn:
+            conn.execute(
+                text(
+                    """
+                    CREATE TABLE credit_redeem_keys (
+                        id INTEGER NOT NULL AUTO_INCREMENT,
+                        redeem_key VARCHAR(16) NOT NULL,
+                        credit_amount INTEGER NOT NULL DEFAULT 0,
+                        batch_no VARCHAR(32) NOT NULL,
+                        status VARCHAR(20) NOT NULL DEFAULT 'enabled',
+                        created_by INTEGER NULL,
+                        used_by_user_id INTEGER NULL,
+                        used_at DATETIME NULL,
+                        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                        PRIMARY KEY (id),
+                        UNIQUE KEY uq_credit_redeem_keys_redeem_key (redeem_key),
+                        INDEX ix_credit_redeem_keys_redeem_key (redeem_key),
+                        INDEX ix_credit_redeem_keys_batch_no (batch_no),
+                        INDEX ix_credit_redeem_keys_status (status),
+                        INDEX ix_credit_redeem_keys_created_by (created_by),
+                        INDEX ix_credit_redeem_keys_used_by_user_id (used_by_user_id),
+                        CONSTRAINT fk_credit_redeem_keys_created_by FOREIGN KEY (created_by) REFERENCES users (id),
+                        CONSTRAINT fk_credit_redeem_keys_used_by_user_id FOREIGN KEY (used_by_user_id) REFERENCES users (id)
+                    )
+                    """
+                )
+            )
+        return
+
+    credit_redeem_columns = {col["name"] for col in inspector.get_columns("credit_redeem_keys")}
+    with engine.begin() as conn:
+        if "status" not in credit_redeem_columns:
+            conn.execute(
+                text(
+                    """
+                    ALTER TABLE credit_redeem_keys
+                    ADD COLUMN status VARCHAR(20) NOT NULL DEFAULT 'enabled'
+                    AFTER batch_no
+                    """
+                )
+            )
+        conn.execute(
+            text(
+                """
+                UPDATE credit_redeem_keys
+                SET status = 'enabled'
+                WHERE status IS NULL OR status = ''
+                """
+            )
+        )
 
 
 def _drop_legacy_user_credits_column():
