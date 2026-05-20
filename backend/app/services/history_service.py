@@ -179,6 +179,7 @@ def get_user_history(
     page: int = 1,
     page_size: int = 20,
     respect_pins: bool = True,
+    include_prompt_reverse: bool = True,
     mode: str | None = None,
     source: str | None = None,
     model: str | None = None,
@@ -206,67 +207,96 @@ def get_user_history(
         .filter(Task.is_deleted.is_(False))
         .filter(Image.is_deleted.is_(False))
     )
-    prompt_reverse_query = (
-        db.query(PromptHistory)
-        .filter(
-            PromptHistory.user_id == user_id,
-            PromptHistory.mode == PROMPT_REVERSE_MODE,
+    prompt_reverse_query = None
+    if include_prompt_reverse:
+        prompt_reverse_query = (
+            db.query(PromptHistory)
+            .filter(
+                PromptHistory.user_id == user_id,
+                PromptHistory.mode == PROMPT_REVERSE_MODE,
+            )
         )
-    )
     if mode:
         if mode == TASK_TYPE_PROMPT_REVERSE:
             image_query = image_query.filter(Task.id.is_(None))
         elif mode == TASK_TYPE_INPAINT:
             image_query = image_query.filter(or_(Task.mode == "inpaint", Task.model == "inpaint"))
-            prompt_reverse_query = prompt_reverse_query.filter(PromptHistory.id.is_(None))
+            prompt_reverse_query = None
         elif mode == TASK_TYPE_TEXT_GENERATE:
             text_generate_models = [key for key, value in scene_type_map.items() if value == "generate"]
             image_query = image_query.filter(Task.mode == "generate")
             image_query = image_query.filter(Task.model.in_(text_generate_models)) if text_generate_models else image_query.filter(Task.id.is_(None))
-            prompt_reverse_query = prompt_reverse_query.filter(PromptHistory.id.is_(None))
+            prompt_reverse_query = None
         elif mode == TASK_TYPE_IMAGE_EDIT:
             image_edit_models = [key for key, value in scene_type_map.items() if value == "image_edit"]
             image_query = image_query.filter(Task.mode == "generate")
             image_query = image_query.filter(Task.model.in_(image_edit_models)) if image_edit_models else image_query.filter(Task.id.is_(None))
-            prompt_reverse_query = prompt_reverse_query.filter(PromptHistory.id.is_(None))
+            prompt_reverse_query = None
         else:
             image_query = image_query.filter(Task.mode == mode)
             if mode != PROMPT_REVERSE_MODE:
-                prompt_reverse_query = prompt_reverse_query.filter(PromptHistory.id.is_(None))
+                prompt_reverse_query = None
     if source:
         image_query = image_query.filter(Task.source == source)
         if source != "web":
-            prompt_reverse_query = prompt_reverse_query.filter(PromptHistory.id.is_(None))
+            prompt_reverse_query = None
     if model:
         image_query = image_query.filter(Task.model == model)
         if model != PROMPT_REVERSE_MODEL:
-            prompt_reverse_query = prompt_reverse_query.filter(PromptHistory.id.is_(None))
+            prompt_reverse_query = None
     if prompt:
         keyword = prompt.strip()
         if keyword:
             image_query = image_query.filter(Task.prompt.ilike(f"%{keyword}%"))
-            prompt_reverse_query = prompt_reverse_query.filter(PromptHistory.prompt.ilike(f"%{keyword}%"))
+            if prompt_reverse_query is not None:
+                prompt_reverse_query = prompt_reverse_query.filter(PromptHistory.prompt.ilike(f"%{keyword}%"))
     if status:
         if status == "processing":
             image_query = image_query.filter(Image.status == "pending", Task.status == "processing")
-            prompt_reverse_query = prompt_reverse_query.filter(PromptHistory.id.is_(None))
+            prompt_reverse_query = None
         elif status == "pending":
             image_query = image_query.filter(Image.status == "pending", Task.status.in_(["pending", "queued"]))
-            prompt_reverse_query = prompt_reverse_query.filter(PromptHistory.id.is_(None))
+            prompt_reverse_query = None
         elif status == "failed":
             image_query = image_query.filter(or_(Image.status == "failed", and_(Image.status == "pending", Task.status == "failed")))
-            prompt_reverse_query = prompt_reverse_query.filter(PromptHistory.id.is_(None))
+            prompt_reverse_query = None
         else:
             image_query = image_query.filter(Image.status == status)
     if start_date:
         image_query = image_query.filter(Task.created_at >= start_date)
-        prompt_reverse_query = prompt_reverse_query.filter(PromptHistory.created_at >= start_date)
+        if prompt_reverse_query is not None:
+            prompt_reverse_query = prompt_reverse_query.filter(PromptHistory.created_at >= start_date)
     if end_date:
         image_query = image_query.filter(Task.created_at <= end_date)
-        prompt_reverse_query = prompt_reverse_query.filter(PromptHistory.created_at <= end_date)
-    images = image_query.order_by(Task.created_at.desc(), Image.id.desc()).all()
-    prompt_reverse_rows = prompt_reverse_query.order_by(PromptHistory.created_at.desc(), PromptHistory.id.desc()).all()
-
+        if prompt_reverse_query is not None:
+            prompt_reverse_query = prompt_reverse_query.filter(PromptHistory.created_at <= end_date)
+    start_index = (page - 1) * page_size
+    fetch_limit = start_index + page_size
+    if respect_pins:
+        images = image_query.order_by(Task.created_at.desc(), Image.id.desc()).all()
+        prompt_reverse_rows = (
+            prompt_reverse_query.order_by(PromptHistory.created_at.desc(), PromptHistory.id.desc()).all()
+            if prompt_reverse_query is not None
+            else []
+        )
+        total = None
+    else:
+        fetch_limit += 1
+        total = None
+        images = (
+            image_query
+            .order_by(Task.created_at.desc(), Image.id.desc())
+            .limit(fetch_limit)
+            .all()
+        )
+        prompt_reverse_rows = (
+            prompt_reverse_query
+            .order_by(PromptHistory.created_at.desc(), PromptHistory.id.desc())
+            .limit(fetch_limit)
+            .all()
+            if prompt_reverse_query is not None
+            else []
+        )
     items = []
     for image in images:
         task = image.task
@@ -362,10 +392,14 @@ def get_user_history(
             ),
             reverse=True,
         )
+        total = len(items)
     else:
         items.sort(key=lambda item: item.get("created_at") or datetime.min, reverse=True)
-    total = len(items)
-    start_index = (page - 1) * page_size
+    if total is None:
+        page_items = items[start_index:start_index + page_size]
+        has_more = len(items) > start_index + page_size
+        total = start_index + len(page_items) + (1 if has_more else 0)
+        return {"total": total, "items": page_items}
     return {"total": total, "items": items[start_index:start_index + page_size]}
 
 

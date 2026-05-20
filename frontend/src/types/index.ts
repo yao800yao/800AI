@@ -93,6 +93,7 @@ export interface HistoryFilter {
   start_date?: string;
   end_date?: string;
   respect_pins?: boolean;
+  include_prompt_reverse?: boolean;
 }
 
 export interface HistoryResponse {

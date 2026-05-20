@@ -33,6 +33,7 @@ from app.services.external_api_config_service import (
     SCENE_INPAINT,
     should_use_multipart_request,
 )
+from app.services.task_service import refund_task_credit_for_http_failure_if_needed
 from app.utils.datetime_utils import now_local
 
 logger = logging.getLogger(__name__)
@@ -201,10 +202,11 @@ def _call_gemini_api(
     mode: str = "generate",
     source_image: str = "",
     mask_image: str = "",
-) -> tuple[tuple[bytes, str] | None, str]:
+) -> tuple[tuple[bytes, str] | None, str, int | None]:
     """
     Call Gemini image generation API.
-    Returns ((image_bytes, mime_type), "") on success and (None, error_message) on failure.
+    Returns ((image_bytes, mime_type), "", None) on success and
+    (None, error_message, http_status_code) on HTTP failure.
     """
     db = SessionLocal()
 
@@ -227,11 +229,11 @@ def _call_gemini_api(
             source_payload = _build_reference_image_payload(source_image)
             if not source_payload:
                 logger.warning("Inpaint source image not found: %s", source_image)
-                return None, "图编辑原图不存在或无法读取"
+                return None, "图编辑原图不存在或无法读取", None
             source_inline_part = source_payload.get("inline_part")
             if not isinstance(source_inline_part, dict):
                 logger.warning("Inpaint source image payload malformed: %s", source_image)
-                return None, "图编辑原图格式无效"
+                return None, "图编辑原图格式无效", None
             parts.append(source_inline_part)
             render_variables["source_image"] = source_inline_part
             render_variables["source_image_base64"] = source_payload["base64"]
@@ -241,11 +243,11 @@ def _call_gemini_api(
             mask_payload = _build_reference_image_payload(mask_image)
             if not mask_payload:
                 logger.warning("Inpaint mask image not found: %s", mask_image)
-                return None, "图编辑蒙版不存在或无法读取"
+                return None, "图编辑蒙版不存在或无法读取", None
             mask_inline_part = mask_payload.get("inline_part")
             if not isinstance(mask_inline_part, dict):
                 logger.warning("Inpaint mask image payload malformed: %s", mask_image)
-                return None, "图编辑蒙版格式无效"
+                return None, "图编辑蒙版格式无效", None
             parts.append(mask_inline_part)
             render_variables["mask_image"] = mask_inline_part
             render_variables["mask_image_base64"] = mask_payload["base64"]
@@ -319,7 +321,7 @@ def _call_gemini_api(
                 )
                 return None, _clip_error_message(
                     f"生图接口返回 HTTP {resp.status_code}: {resp.text[:500] or '(空响应)'}"
-                )
+                ), resp.status_code
 
             data = resp.json()
 
@@ -332,22 +334,23 @@ def _call_gemini_api(
                     "Generation API success, configured field=%s, mime=%s, image size: %d bytes",
                     configured_field_path, mime, len(img_bytes),
                 )
-                return result, ""
+                return result, "", None
             logger.warning("Generation API configured field extraction failed: %s", error_message)
-            return None, error_message
+            return None, error_message, None
 
-        return _extract_legacy_image_data(data)
+        result, error_message = _extract_legacy_image_data(data)
+        return result, error_message, None
     except HTTPException as exc:
         detail = exc.detail if isinstance(exc.detail, str) else str(exc.detail)
         logger.error("Generation API config error: %s", detail)
-        return None, _clip_error_message(detail)
+        return None, _clip_error_message(detail), None
 
     except httpx.TimeoutException:
         logger.error("Generation API request timed out (%s seconds)", settings.AI_TIMEOUT)
-        return None, f"生图接口请求超时（{settings.AI_TIMEOUT} 秒）"
+        return None, f"生图接口请求超时（{settings.AI_TIMEOUT} 秒）", None
     except Exception as e:
         logger.error("Generation API error: %s", e, exc_info=True)
-        return None, _clip_error_message(f"生图接口调用异常: {e}")
+        return None, _clip_error_message(f"生图接口调用异常: {e}"), None
     finally:
         db.close()
 
@@ -535,6 +538,7 @@ def _recover_task_after_exception(task_id: int, error_message: str) -> None:
         if task.status == "processing":
             task.status = "failed"
         task.error_message = "" if task.status == "success" else normalized_error
+        refund_task_credit_for_http_failure_if_needed(recovery_db, task)
         recovery_db.commit()
     except Exception:
         _rollback_session_safely(recovery_db)
@@ -665,6 +669,7 @@ def _process_task(task_id: int, *, use_distributed_lock: bool = True):
         if not pending_images:
             task.status = _resolve_task_status(images)
             task.error_message = "" if task.status == "success" else (task.error_message or "生图失败")
+            refund_task_credit_for_http_failure_if_needed(db, task)
             db.commit()
             logger.info(
                 "Task finished without pending images",
@@ -690,7 +695,7 @@ def _process_task(task_id: int, *, use_distributed_lock: bool = True):
             if _mark_task_request_started(task):
                 db.commit()
                 db.refresh(task)
-            result, error_message = _call_gemini_api(
+            result, error_message, http_status_code = _call_gemini_api(
                 prompt=task.prompt,
                 aspect_ratio=task.size,
                 image_size=task.resolution,
@@ -735,6 +740,11 @@ def _process_task(task_id: int, *, use_distributed_lock: bool = True):
         task.status = "success" if all_success else "failed"
         if task.status == "success":
             task.error_message = ""
+        refund_task_credit_for_http_failure_if_needed(
+            db,
+            task,
+            http_status_code=http_status_code if "http_status_code" in locals() else None,
+        )
         db.commit()
         logger.info(
             "Task processing finished",
@@ -815,7 +825,7 @@ def _process_single_image(image_id: int, *, use_distributed_lock: bool = True):
             db.commit()
             db.refresh(task)
 
-        result, error_message = _call_gemini_api(
+        result, error_message, _http_status_code = _call_gemini_api(
             prompt=task.prompt,
             aspect_ratio=task.size,
             image_size=task.resolution,

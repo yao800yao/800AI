@@ -147,6 +147,7 @@ function syncHistoryPolling() {
 
 function getHistoryQuery() {
   return {
+    respect_pins: false,
     mode: typeFilter.value,
     source: sourceFilter.value,
     model: modelFilter.value,

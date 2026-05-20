@@ -39,7 +39,11 @@ import { useAuthStore } from "@/stores/auth";
 import RepaintCanvas from "@/components/generate/RepaintCanvas.vue";
 import FeedbackDialog from "@/components/feedback/FeedbackDialog.vue";
 import { withBaseUrl } from "@/lib/assets";
-import { formatGenerationErrorMessage, getPreferredGenerationErrorMessage } from "@/lib/generationErrors";
+import {
+  formatGenerationErrorMessage,
+  formatGenerationTaskFailureMessage,
+  getPreferredGenerationErrorMessage,
+} from "@/lib/generationErrors";
 import { setStoredUserCompletedUnreadFeedbackCount } from "@/lib/userFeedbackNotice";
 import type { GenerationModelOption, ImageResult, PromptHistoryItem, SceneOptionItem, TaskResult, TaskSceneConfig, UserHistoryCard } from "@/types";
 
@@ -514,7 +518,7 @@ function syncTaskFromResult(taskId: string, data: TaskResult) {
   if (previousStatus !== data.status && (data.status === "success" || data.status === "failed")) {
     data.status === "success"
       ? message.success(`任务 #${taskId} 已完成`)
-      : message.warning(formatGenerationErrorMessage(nextErrorMessage, `任务 #${taskId} 生成失败`));
+      : message.warning(formatGenerationTaskFailureMessage(nextErrorMessage));
   }
 }
 
@@ -566,6 +570,14 @@ function getGeneratedTaskFailureMessage(task: GeneratedTaskItem, image: ImageRes
   return getPreferredGenerationErrorMessage(task.errorMessage, image.error_message, "生成失败，请重试");
 }
 
+function isGeneratedResultFailed(task: GeneratedTaskItem, image: ImageResult) {
+  return task.status === "failed" && image.status === "failed";
+}
+
+function canRemoveGeneratedResult(task: GeneratedTaskItem, image: ImageResult) {
+  return image.status === "success" || isGeneratedResultFailed(task, image);
+}
+
 async function loadRecentGeneratedTasks() {
   if (!auth.isLoggedIn) {
     generatedTasks.value = [];
@@ -580,7 +592,10 @@ async function loadRecentGeneratedTasks() {
     let total = Infinity;
 
     while (recentHistoryItems.length < total && seenTaskIds.size < MAX_RECENT_GENERATED_TASKS) {
-      const res = await fetchHistory(page, MAX_RECENT_GENERATED_TASKS, { respect_pins: false });
+      const res = await fetchHistory(page, MAX_RECENT_GENERATED_TASKS, {
+        respect_pins: false,
+        include_prompt_reverse: false,
+      });
       total = res.total;
       if (!res.items.length) break;
 
@@ -2254,13 +2269,13 @@ watch(() => auth.isLoggedIn, (isLoggedIn) => {
                       <button
                         type="button"
                         class="result-more-trigger icon-chip"
-                        :class="{ 'result-more-trigger-failed': item.image.status === 'failed' }"
+                        :class="{ 'result-more-trigger-failed': isGeneratedResultFailed(item.task, item.image) }"
                         @click.stop="openFeedbackDialogForGeneratedTask(item.task)"
                       >
                         <MessageOutlined class="result-more-icon" />
                       </button>
                     </a-tooltip>
-                    <a-tooltip v-if="item.image.status !== 'pending'" title="删除">
+                    <a-tooltip v-if="canRemoveGeneratedResult(item.task, item.image)" title="删除">
                       <a-button
                         shape="circle"
                         class="icon-chip result-delete-trigger"
@@ -2275,7 +2290,7 @@ watch(() => auth.isLoggedIn, (isLoggedIn) => {
                     class="result-frame"
                     :class="{
                       pending: item.image.status === 'pending',
-                      failed: item.image.status === 'failed',
+                      failed: isGeneratedResultFailed(item.task, item.image),
                       clickable: !!getGeneratedResultPreviewUrl(item.task, item.image),
                     }"
                     @click="getGeneratedResultPreviewUrl(item.task, item.image) && handlePreview(getGeneratedResultPreviewUrl(item.task, item.image))"
@@ -2316,7 +2331,7 @@ watch(() => auth.isLoggedIn, (isLoggedIn) => {
                       </div>
                     </template>
 
-                    <template v-else-if="item.image.status === 'failed'">
+                    <template v-else-if="isGeneratedResultFailed(item.task, item.image)">
                       <img :src="failedResultAsset" alt="生成失败" class="failed-image" />
                       <div class="frame-state error">
                         <span>{{ getGeneratedTaskFailureMessage(item.task, item.image) }}</span>
@@ -2332,6 +2347,7 @@ watch(() => auth.isLoggedIn, (isLoggedIn) => {
                           :indicator="h(LoadingOutlined, { style: neutralIndicatorStyle })"
                         />
                         <span>正在生成图片...</span>
+                        <span class="frame-state-subtext">预计 30 秒 ～ 2 分钟</span>
                       </div>
                       <div class="result-actions result-actions-pending">
                         <a-tooltip title="重新生成">
@@ -3981,6 +3997,12 @@ watch(() => auth.isLoggedIn, (isLoggedIn) => {
     );
     color: #c9493c;
   }
+}
+
+.frame-state-subtext {
+  margin-top: -4px;
+  color: rgba(141, 119, 88, 0.78);
+  font-size: 12px;
 }
 
 .result-more-trigger.icon-chip {
