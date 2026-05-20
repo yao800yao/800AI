@@ -25,6 +25,12 @@ import {
   setStoredUserCompletedUnreadFeedbackCount,
   subscribeUserCompletedUnreadFeedbackCount,
 } from "@/lib/userFeedbackNotice";
+import { getMyUnreadSystemMessageCount } from "@/api/systemMessages";
+import {
+  getStoredUnreadSystemMessageCount,
+  setStoredUnreadSystemMessageCount,
+  subscribeUnreadSystemMessageCount,
+} from "@/lib/systemMessageNotice";
 import { subscribeAuthSessionExpired } from "@/lib/authSessionNotice";
 import { APP_THEME_ATTRIBUTE, type AppThemeName } from "@/config/theme";
 import { getCurrentTheme } from "@/lib/theme";
@@ -62,19 +68,22 @@ const routeOrder = new Map<string, number>([
   ["/generate", 2],
   ["/history", 3],
   ["/profile", 4],
-  ["/settings", 5],
-  ["/credit-logs", 6],
-  ["/feedbacks", 7],
-  ["/feedbacks/:feedbackId", 8],
-  ["/admin/templates", 9],
-  ["/admin/users", 10],
-  ["/admin/redeem-keys", 11],
-  ["/admin/dashboard", 12],
-  ["/admin/feedbacks", 13],
-  ["/admin/feedbacks/:feedbackId", 14],
-  ["/admin/api-key", 15],
-  ["/admin/cos-config", 16],
-  ["/admin/external-api-configs", 17],
+  ["/system-messages", 5],
+  ["/system-messages/:messageId", 6],
+  ["/settings", 7],
+  ["/credit-logs", 8],
+  ["/feedbacks", 9],
+  ["/feedbacks/:feedbackId", 10],
+  ["/admin/templates", 11],
+  ["/admin/users", 12],
+  ["/admin/redeem-keys", 13],
+  ["/admin/dashboard", 14],
+  ["/admin/feedbacks", 15],
+  ["/admin/feedbacks/:feedbackId", 16],
+  ["/admin/system-messages", 17],
+  ["/admin/api-key", 18],
+  ["/admin/cos-config", 19],
+  ["/admin/external-api-configs", 20],
 ]);
 
 const currentTheme = ref<AppThemeName>(getCurrentTheme());
@@ -83,6 +92,9 @@ const adminUnresolvedFeedbackCount = ref(getStoredAdminUnresolvedFeedbackCount()
 let unsubscribeAdminFeedbackCount: (() => void) | null = null;
 const userCompletedUnreadFeedbackCount = ref(getStoredUserCompletedUnreadFeedbackCount());
 let unsubscribeUserFeedbackCount: (() => void) | null = null;
+const userUnreadSystemMessageCount = ref(getStoredUnreadSystemMessageCount());
+let unsubscribeSystemMessageCount: (() => void) | null = null;
+let systemMessagePollTimer: ReturnType<typeof window.setInterval> | null = null;
 let unsubscribeAuthSessionExpired: (() => void) | null = null;
 const UNRESOLVED_FEEDBACK_NOTIFICATION_KEY = "global-admin-unresolved-feedback";
 
@@ -103,27 +115,45 @@ const adminMenuItems = computed(() =>
   [
     { key: "/admin/templates", label: "模版管理", icon: PictureOutlined, superAdminOnly: false },
     { key: "/admin/users", label: "用户管理", icon: TeamOutlined, superAdminOnly: false },
-    { key: "/admin/redeem-keys", label: "兑换码管理", icon: GiftOutlined, superAdminOnly: false },
     { key: "/admin/dashboard", label: "数据统计", icon: BarChartOutlined, superAdminOnly: false },
+    { key: "/admin/redeem-keys", label: "兑换码管理", icon: GiftOutlined, superAdminOnly: false },
     { key: "/admin/feedbacks", label: "用户反馈", icon: MessageOutlined, superAdminOnly: false },
+    { key: "/admin/system-messages", label: "系统邮件", icon: MailOutlined, superAdminOnly: false },
     { key: "/admin/cos-config", label: "COS 配置", icon: CloudUploadOutlined, superAdminOnly: true },
     { key: "/admin/external-api-configs", label: "接口管理", icon: KeyOutlined, superAdminOnly: true },
   ].filter((item) => !item.superAdminOnly || isSuperAdmin.value)
 );
+const adminMenuBaseItems = computed(() =>
+  adminMenuItems.value.filter((item) => ["/admin/templates", "/admin/users", "/admin/dashboard", "/admin/redeem-keys"].includes(item.key))
+);
+const adminMenuNoticeItems = computed(() =>
+  adminMenuItems.value.filter((item) => ["/admin/feedbacks", "/admin/system-messages"].includes(item.key))
+);
+const adminMenuConfigItems = computed(() =>
+  adminMenuItems.value.filter((item) => ["/admin/cos-config", "/admin/external-api-configs"].includes(item.key))
+);
 
 const hasAdminUnresolvedFeedback = computed(() => adminUnresolvedFeedbackCount.value > 0);
 const hasUserUnreadFeedback = computed(() => userCompletedUnreadFeedbackCount.value > 0);
+const hasUserUnreadSystemMessage = computed(() => userUnreadSystemMessageCount.value > 0);
+const hasUserUnreadNotice = computed(() => hasUserUnreadFeedback.value || hasUserUnreadSystemMessage.value);
 
 const userMenuItems = [
   { key: "profile", label: "个人主页", icon: UserOutlined, danger: false },
-  { key: "my-feedback", label: "我的反馈", icon: MessageOutlined, danger: false },
-  { key: "settings", label: "设置", icon: SettingOutlined, danger: false },
   { key: "credits", label: "积分记录", icon: ThunderboltOutlined, danger: false },
+  { key: "settings", label: "设置", icon: SettingOutlined, danger: false },
+  { key: "my-feedback", label: "我的反馈", icon: MessageOutlined, danger: false },
+  { key: "system-messages", label: "系统消息", icon: MailOutlined, danger: false },
   { key: "logout", label: "退出登录", icon: LogoutOutlined, danger: true },
 ];
+const userMenuAccountItems = userMenuItems.filter((item) => ["profile", "credits", "settings"].includes(item.key));
+const userMenuNoticeItems = userMenuItems.filter((item) => ["my-feedback", "system-messages"].includes(item.key));
+const userMenuDangerItems = userMenuItems.filter((item) => item.danger);
+
 
 function getRouteRank(path: string) {
   if (path.startsWith("/feedbacks/")) return routeOrder.get("/feedbacks/:feedbackId") ?? 0;
+  if (path.startsWith("/system-messages/")) return routeOrder.get("/system-messages/:messageId") ?? 0;
   if (path.startsWith("/admin/feedbacks/")) return routeOrder.get("/admin/feedbacks/:feedbackId") ?? 0;
   return routeOrder.get(path) ?? 0;
 }
@@ -134,7 +164,7 @@ const selectedKeys = computed(() => {
   if (p === "/") return [];
   if (p === "/templates") return ["templates"];
   if (p === "/history") return ["history"];
-  if (p === "/profile" || p === "/settings" || p === "/credit-logs" || p.startsWith("/feedbacks")) return [];
+  if (p === "/profile" || p === "/settings" || p === "/credit-logs" || p.startsWith("/feedbacks") || p.startsWith("/system-messages")) return [];
   return ["generate"];
 });
 
@@ -184,11 +214,14 @@ function handleAdminMenu({ key }: { key: string }) {
 function handleUserMenu({ key }: { key: string }) {
   mobileDrawerOpen.value = false;
   if (key === "profile") router.push("/profile");
+  else if (key === "system-messages") router.push("/system-messages");
   else if (key === "my-feedback") router.push("/feedbacks");
   else if (key === "settings") router.push("/settings");
   else if (key === "credits") router.push("/credit-logs");
   else if (key === "logout") {
     auth.logout();
+    setStoredUnreadSystemMessageCount(0);
+    stopSystemMessagePolling();
     router.push("/");
   }
 }
@@ -227,6 +260,33 @@ async function syncUserCompletedUnreadFeedbackCount() {
   } catch {
     // ignore user unread feedback count failures
   }
+}
+
+async function syncUserUnreadSystemMessageCount(options?: { showToast?: boolean }) {
+  if (!auth.isLoggedIn) return;
+  try {
+    const previous = userUnreadSystemMessageCount.value;
+    const { count } = await getMyUnreadSystemMessageCount();
+    userUnreadSystemMessageCount.value = setStoredUnreadSystemMessageCount(count);
+    if (options?.showToast && count > previous) {
+      message.info(count === 1 ? "你有新的系统消息" : `你有 ${count} 条未读系统消息`);
+    }
+  } catch {
+    // ignore system message count failures
+  }
+}
+
+function startSystemMessagePolling() {
+  if (typeof window === "undefined" || systemMessagePollTimer) return;
+  systemMessagePollTimer = window.setInterval(() => {
+    void syncUserUnreadSystemMessageCount({ showToast: true });
+  }, 60000);
+}
+
+function stopSystemMessagePolling() {
+  if (!systemMessagePollTimer) return;
+  window.clearInterval(systemMessagePollTimer);
+  systemMessagePollTimer = null;
 }
 
 const loginModalVisible = ref(false);
@@ -296,6 +356,8 @@ async function handleLoginSubmit() {
     resetAuthForms();
     await nextTick();
     await checkAnnouncement();
+    await syncUserUnreadSystemMessageCount();
+    startSystemMessagePolling();
     if (redirectPath && redirectPath !== route.fullPath) {
       await router.replace(redirectPath);
     }
@@ -365,6 +427,8 @@ async function handleRegisterSubmit() {
     resetAuthForms();
     await nextTick();
     await checkAnnouncement();
+    await syncUserUnreadSystemMessageCount();
+    startSystemMessagePolling();
   } catch (err: any) {
     message.error(err.response?.data?.detail || err.message || "注册失败");
   } finally {
@@ -463,6 +527,9 @@ onMounted(async () => {
   unsubscribeUserFeedbackCount = subscribeUserCompletedUnreadFeedbackCount((count) => {
     userCompletedUnreadFeedbackCount.value = count;
   });
+  unsubscribeSystemMessageCount = subscribeUnreadSystemMessageCount((count) => {
+    userUnreadSystemMessageCount.value = count;
+  });
   unsubscribeAuthSessionExpired = subscribeAuthSessionExpired(handleAuthSessionExpired);
 
   if (typeof document !== "undefined") {
@@ -491,6 +558,8 @@ onMounted(async () => {
   }
   await syncAdminUnresolvedFeedbackCount();
   await syncUserCompletedUnreadFeedbackCount();
+  await syncUserUnreadSystemMessageCount();
+  startSystemMessagePolling();
 });
 
 onBeforeUnmount(() => {
@@ -498,8 +567,11 @@ onBeforeUnmount(() => {
   unsubscribeAdminFeedbackCount = null;
   unsubscribeUserFeedbackCount?.();
   unsubscribeUserFeedbackCount = null;
+  unsubscribeSystemMessageCount?.();
+  unsubscribeSystemMessageCount = null;
   unsubscribeAuthSessionExpired?.();
   unsubscribeAuthSessionExpired = null;
+  stopSystemMessagePolling();
   themeObserver?.disconnect();
   themeObserver = null;
 });
@@ -519,6 +591,7 @@ function openRedeemEntry() {
   }
   redeemDialogOpen.value = true;
 }
+
 
 function goCreditLogs() {
   mobileDrawerOpen.value = false;
@@ -596,7 +669,15 @@ watch(
               <template #overlay>
                 <a-menu :selected-keys="adminSelectedKeys" @click="handleAdminMenu">
                   <a-menu-item
-                    v-for="item in adminMenuItems"
+                    v-for="item in adminMenuBaseItems"
+                    :key="item.key"
+                  >
+                    <component :is="item.icon" />
+                    <span style="margin-left: 8px">{{ item.label }}</span>
+                  </a-menu-item>
+                  <a-menu-divider />
+                  <a-menu-item
+                    v-for="item in adminMenuNoticeItems"
                     :key="item.key"
                     :class="{ 'admin-feedback-dropdown-item': item.key === '/admin/feedbacks' }"
                   >
@@ -611,6 +692,16 @@ watch(
                     </span>
                     <span v-else style="margin-left: 8px">{{ item.label }}</span>
                   </a-menu-item>
+                  <template v-if="adminMenuConfigItems.length">
+                    <a-menu-divider />
+                    <a-menu-item
+                      v-for="item in adminMenuConfigItems"
+                      :key="item.key"
+                    >
+                      <component :is="item.icon" />
+                      <span style="margin-left: 8px">{{ item.label }}</span>
+                    </a-menu-item>
+                  </template>
                 </a-menu>
               </template>
             </a-dropdown>
@@ -625,7 +716,7 @@ watch(
                 dot
                 :offset="[-2, 6]"
                 :show-zero="false"
-                :count="hasUserUnreadFeedback ? 1 : 0"
+                :count="hasUserUnreadNotice ? 1 : 0"
                 :dot-style="{ width: '12px', height: '12px', minWidth: '12px', boxShadow: '0 0 0 2px #fffdf8' }"
               >
                 <div class="user-trigger">
@@ -638,9 +729,17 @@ watch(
               <template #overlay>
                 <a-menu @click="handleUserMenu">
                   <a-menu-item
-                    v-for="item in userMenuItems.filter((entry) => !entry.danger)"
+                    v-for="item in userMenuAccountItems"
                     :key="item.key"
-                    :class="{ 'user-feedback-dropdown-item': item.key === 'my-feedback' }"
+                  >
+                    <component :is="item.icon" />
+                    <span style="margin-left: 8px">{{ item.label }}</span>
+                  </a-menu-item>
+                  <a-menu-divider />
+                  <a-menu-item
+                    v-for="item in userMenuNoticeItems"
+                    :key="item.key"
+                    class="user-feedback-dropdown-item"
                   >
                     <component :is="item.icon" />
                     <span v-if="item.key === 'my-feedback'" class="user-menu-feedback-label">
@@ -651,11 +750,19 @@ watch(
                         :dot-style="{ width: '10px', height: '10px', minWidth: '10px' }"
                       />
                     </span>
+                    <span v-else-if="item.key === 'system-messages'" class="user-menu-feedback-label">
+                      <span>{{ item.label }}</span>
+                      <a-badge
+                        v-if="hasUserUnreadSystemMessage"
+                        dot
+                        :dot-style="{ width: '10px', height: '10px', minWidth: '10px' }"
+                      />
+                    </span>
                     <span v-else style="margin-left: 8px">{{ item.label }}</span>
                   </a-menu-item>
                   <a-menu-divider />
                   <a-menu-item
-                    v-for="item in userMenuItems.filter((entry) => entry.danger)"
+                    v-for="item in userMenuDangerItems"
                     :key="item.key"
                     danger
                   >
@@ -760,7 +867,12 @@ watch(
             class="mobile-drawer-menu"
             @click="handleAdminMenu"
           >
-            <a-menu-item v-for="item in adminMenuItems" :key="item.key">
+            <a-menu-item v-for="item in adminMenuBaseItems" :key="item.key">
+              <component :is="item.icon" />
+              <span>{{ item.label }}</span>
+            </a-menu-item>
+            <a-menu-divider />
+            <a-menu-item v-for="item in adminMenuNoticeItems" :key="item.key">
               <component :is="item.icon" />
               <span v-if="item.key === '/admin/feedbacks'" class="admin-menu-feedback-label">
                 <span>{{ item.label }}</span>
@@ -772,6 +884,13 @@ watch(
               </span>
               <span v-else>{{ item.label }}</span>
             </a-menu-item>
+            <template v-if="adminMenuConfigItems.length">
+              <a-menu-divider />
+              <a-menu-item v-for="item in adminMenuConfigItems" :key="item.key">
+                <component :is="item.icon" />
+                <span>{{ item.label }}</span>
+              </a-menu-item>
+            </template>
           </a-menu>
         </div>
 
@@ -783,9 +902,41 @@ watch(
           <div v-if="auth.isLoggedIn">
             <a-menu mode="inline" class="mobile-drawer-menu" @click="handleUserMenu">
               <a-menu-item
-                v-for="item in userMenuItems"
+                v-for="item in userMenuAccountItems"
                 :key="item.key"
-                :danger="item.danger"
+              >
+                <component :is="item.icon" />
+                <span>{{ item.label }}</span>
+              </a-menu-item>
+              <a-menu-divider />
+              <a-menu-item
+                v-for="item in userMenuNoticeItems"
+                :key="item.key"
+              >
+                <component :is="item.icon" />
+                <span v-if="item.key === 'my-feedback'" class="user-menu-feedback-label">
+                  <span>{{ item.label }}</span>
+                  <a-badge
+                    v-if="hasUserUnreadFeedback"
+                    dot
+                    :dot-style="{ width: '10px', height: '10px', minWidth: '10px' }"
+                  />
+                </span>
+                <span v-else-if="item.key === 'system-messages'" class="user-menu-feedback-label">
+                  <span>{{ item.label }}</span>
+                  <a-badge
+                    v-if="hasUserUnreadSystemMessage"
+                    dot
+                    :dot-style="{ width: '10px', height: '10px', minWidth: '10px' }"
+                  />
+                </span>
+                <span v-else>{{ item.label }}</span>
+              </a-menu-item>
+              <a-menu-divider />
+              <a-menu-item
+                v-for="item in userMenuDangerItems"
+                :key="item.key"
+                danger
               >
                 <component :is="item.icon" />
                 <span>{{ item.label }}</span>
@@ -831,6 +982,7 @@ watch(
         </ul>
       </div>
     </a-modal>
+
 
     <a-modal
       v-model:open="announcementVisible"
@@ -1577,6 +1729,7 @@ html:is([data-theme="dark"], [data-theme="midnight"]) .warm-dropdown .ant-dropdo
   line-height: 1.8;
 }
 
+
 .announcement-modal {
   display: flex;
   flex-direction: column;
@@ -1834,6 +1987,7 @@ html:is([data-theme="dark"], [data-theme="midnight"]) .warm-dropdown .ant-dropdo
   :deep(.mobile-nav-drawer .ant-drawer-content-wrapper) {
     width: min(88vw, 320px) !important;
   }
+
 }
 </style>
 

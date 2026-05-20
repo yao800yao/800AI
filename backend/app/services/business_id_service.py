@@ -4,6 +4,7 @@ from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
 
 from app.models.feedback import Feedback
+from app.models.system_message import SystemMessage
 from app.models.task import Task
 from app.models.user import User
 from app.utils.business_id import normalize_business_id
@@ -25,6 +26,12 @@ def feedback_external_id(feedback: Feedback | None) -> str:
     if not feedback:
         return ""
     return (feedback.business_id or "").strip() or str(feedback.id)
+
+
+def system_message_external_id(message: SystemMessage | None) -> str:
+    if not message:
+        return ""
+    return (message.business_id or "").strip() or str(message.id)
 
 
 def get_user_by_business_id(db: Session, business_id: str) -> User | None:
@@ -67,4 +74,11 @@ def require_feedback_by_business_id(db: Session, business_id: str) -> Feedback:
     if not feedback:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="反馈不存在")
     return feedback
+
+
+def get_system_message_by_business_id(db: Session, business_id: str) -> SystemMessage | None:
+    normalized = normalize_business_id(business_id)
+    if not normalized:
+        return None
+    return db.query(SystemMessage).filter(SystemMessage.business_id == normalized).first()
 

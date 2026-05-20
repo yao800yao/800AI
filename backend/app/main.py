@@ -99,6 +99,7 @@ def on_startup():
     _ensure_scene_binding_required_columns()
     _ensure_template_required_columns()
     _ensure_feedback_schema()
+    _ensure_system_message_schema()
     _ensure_history_pin_schema()
     if settings.should_run_schema_compat:
         _ensure_schema_compat()
@@ -975,6 +976,116 @@ def _ensure_feedback_schema():
             conn.execute(text("CREATE UNIQUE INDEX ix_feedback_business_id ON feedback (business_id)"))
 
 
+def _ensure_system_message_schema():
+    inspector = inspect(engine)
+    table_names = set(inspector.get_table_names())
+    if "users" not in table_names:
+        return
+    if "system_messages" not in table_names:
+        from app.models.system_message import SystemMessage
+
+        SystemMessage.__table__.create(bind=engine)
+        inspector = inspect(engine)
+        table_names = set(inspector.get_table_names())
+    if "system_message_recipients" not in table_names:
+        from app.models.system_message import SystemMessageRecipient
+
+        SystemMessageRecipient.__table__.create(bind=engine)
+        inspector = inspect(engine)
+
+    message_columns = {col["name"] for col in inspector.get_columns("system_messages")}
+    recipient_columns = {col["name"] for col in inspector.get_columns("system_message_recipients")}
+    message_indexes = {index["name"] for index in inspector.get_indexes("system_messages")}
+    recipient_indexes = {index["name"] for index in inspector.get_indexes("system_message_recipients")}
+
+    with engine.begin() as conn:
+        if "business_id" not in message_columns:
+            conn.execute(text("ALTER TABLE system_messages ADD COLUMN business_id VARCHAR(32) NULL"))
+        if "subject" not in message_columns:
+            conn.execute(text("ALTER TABLE system_messages ADD COLUMN subject VARCHAR(200) NOT NULL DEFAULT ''"))
+        if "content_html" not in message_columns:
+            conn.execute(text("ALTER TABLE system_messages ADD COLUMN content_html LONGTEXT"))
+        if "content_text" not in message_columns:
+            conn.execute(text("ALTER TABLE system_messages ADD COLUMN content_text LONGTEXT"))
+        if "sender_id" not in message_columns:
+            conn.execute(text("ALTER TABLE system_messages ADD COLUMN sender_id INTEGER"))
+        if "recipient_scope" not in message_columns:
+            conn.execute(text("ALTER TABLE system_messages ADD COLUMN recipient_scope VARCHAR(20) DEFAULT 'selected'"))
+        if "recipient_count" not in message_columns:
+            conn.execute(text("ALTER TABLE system_messages ADD COLUMN recipient_count INTEGER DEFAULT 0"))
+        if "created_at" not in message_columns:
+            conn.execute(text("ALTER TABLE system_messages ADD COLUMN created_at DATETIME DEFAULT CURRENT_TIMESTAMP"))
+        if "updated_at" not in message_columns:
+            conn.execute(text("ALTER TABLE system_messages ADD COLUMN updated_at DATETIME DEFAULT CURRENT_TIMESTAMP"))
+
+        if "message_id" not in recipient_columns:
+            conn.execute(text("ALTER TABLE system_message_recipients ADD COLUMN message_id INTEGER"))
+        if "user_id" not in recipient_columns:
+            conn.execute(text("ALTER TABLE system_message_recipients ADD COLUMN user_id INTEGER"))
+        if "is_read" not in recipient_columns:
+            conn.execute(text("ALTER TABLE system_message_recipients ADD COLUMN is_read TINYINT(1) DEFAULT 0"))
+        if "read_at" not in recipient_columns:
+            conn.execute(text("ALTER TABLE system_message_recipients ADD COLUMN read_at DATETIME"))
+        if "created_at" not in recipient_columns:
+            conn.execute(text("ALTER TABLE system_message_recipients ADD COLUMN created_at DATETIME DEFAULT CURRENT_TIMESTAMP"))
+
+        conn.execute(text("UPDATE system_messages SET subject = '' WHERE subject IS NULL"))
+        conn.execute(text("UPDATE system_messages SET content_html = '' WHERE content_html IS NULL"))
+        conn.execute(text("UPDATE system_messages SET content_text = '' WHERE content_text IS NULL"))
+        conn.execute(text("UPDATE system_messages SET recipient_scope = 'selected' WHERE recipient_scope IS NULL OR recipient_scope = ''"))
+        conn.execute(text("UPDATE system_messages SET recipient_count = 0 WHERE recipient_count IS NULL"))
+        conn.execute(text("UPDATE system_message_recipients SET is_read = 0 WHERE is_read IS NULL"))
+
+        conn.execute(text("ALTER TABLE system_messages MODIFY COLUMN content_html LONGTEXT"))
+        conn.execute(text("ALTER TABLE system_messages MODIFY COLUMN content_text LONGTEXT"))
+
+        if "ix_system_messages_subject" not in message_indexes:
+            conn.execute(text("CREATE INDEX ix_system_messages_subject ON system_messages (subject)"))
+        if "ix_system_messages_sender_id" not in message_indexes:
+            conn.execute(text("CREATE INDEX ix_system_messages_sender_id ON system_messages (sender_id)"))
+        if "ix_system_messages_recipient_scope" not in message_indexes:
+            conn.execute(text("CREATE INDEX ix_system_messages_recipient_scope ON system_messages (recipient_scope)"))
+        if "ix_system_message_recipients_message_id" not in recipient_indexes:
+            conn.execute(text("CREATE INDEX ix_system_message_recipients_message_id ON system_message_recipients (message_id)"))
+        if "ix_system_message_recipients_user_id" not in recipient_indexes:
+            conn.execute(text("CREATE INDEX ix_system_message_recipients_user_id ON system_message_recipients (user_id)"))
+        if "ix_system_message_recipients_is_read" not in recipient_indexes:
+            conn.execute(text("CREATE INDEX ix_system_message_recipients_is_read ON system_message_recipients (is_read)"))
+
+    from app.database import SessionLocal
+    from app.models.system_message import SystemMessage
+
+    db = SessionLocal()
+    try:
+        changed = False
+        rows = db.query(SystemMessage).filter((SystemMessage.business_id.is_(None)) | (SystemMessage.business_id == "")).all()
+        for row in rows:
+            row.business_id = generate_business_id()
+            changed = True
+        if changed:
+            db.commit()
+    finally:
+        db.close()
+
+    refreshed_indexes = {index["name"] for index in inspect(engine).get_indexes("system_messages")}
+    refreshed_unique_constraints = {
+        constraint["name"]
+        for constraint in inspect(engine).get_unique_constraints("system_message_recipients")
+    }
+    with engine.begin() as conn:
+        if "ix_system_messages_business_id" not in refreshed_indexes:
+            conn.execute(text("CREATE UNIQUE INDEX ix_system_messages_business_id ON system_messages (business_id)"))
+        if "uq_system_message_recipient_message_user" not in refreshed_unique_constraints:
+            conn.execute(
+                text(
+                    """
+                    CREATE UNIQUE INDEX uq_system_message_recipient_message_user
+                    ON system_message_recipients (message_id, user_id)
+                    """
+                )
+            )
+
+
 def _ensure_history_pin_schema():
     inspector = inspect(engine)
     if "history_pins" not in inspector.get_table_names():
@@ -1115,13 +1226,15 @@ upload_path = Path(settings.UPLOAD_DIR)
 upload_path.mkdir(parents=True, exist_ok=True)
 app.mount("/uploads", StaticFiles(directory=str(upload_path)), name="uploads")
 
-from app.api import auth, tasks, images, history, admin, upload, api_key, templates, prompt_reverse, external_api_config, feedback  # noqa: E402
+from app.api import auth, tasks, images, history, admin, upload, api_key, templates, prompt_reverse, external_api_config, feedback, system_messages  # noqa: E402
 app.include_router(auth.router)
 app.include_router(templates.router)
 app.include_router(tasks.router)
 app.include_router(images.router)
 app.include_router(history.router)
 app.include_router(feedback.router)
+app.include_router(system_messages.router)
+app.include_router(system_messages.admin_router)
 app.include_router(admin.router)
 app.include_router(upload.router)
 app.include_router(api_key.router)

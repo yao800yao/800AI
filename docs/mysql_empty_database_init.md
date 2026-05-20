@@ -206,6 +206,26 @@
 - `handled_at`: 处理时间。
 - `created_at` / `updated_at`: 创建时间、更新时间。
 
+### `system_messages`
+
+- `business_id`: 系统消息对外业务 ID，32 位十六进制字符串。
+- `subject`: 消息主题。
+- `content_html`: 富文本正文，应用层会进行基础 HTML 清理；图片可保存为 base64 data URL。
+- `content_text`: 从富文本正文提取的纯文本摘要。
+- `sender_id`: 发送管理员。
+- `recipient_scope`: 接收范围，`selected` 表示指定用户，`all` 表示发送时快照全部可用用户。
+- `recipient_count`: 发送时实际生成的收件人数。
+- `created_at` / `updated_at`: 创建时间、更新时间。
+
+### `system_message_recipients`
+
+- `message_id`: 关联系统消息。
+- `user_id`: 接收用户。
+- `is_read`: 用户侧是否已读；`0` 表示未读，`1` 表示已读，默认 `0`。
+- `read_at`: 用户首次打开详情并标记已读的时间。
+- `created_at`: 收件记录创建时间。
+- 使用联合唯一约束 `(message_id, user_id)` 保证同一消息不会重复投递给同一用户。
+
 ### `regenerate_logs`
 
 - `image_id`: 被重绘的原图片 ID。
@@ -571,6 +591,41 @@ CREATE TABLE feedback (
   CONSTRAINT fk_feedback_user FOREIGN KEY (user_id) REFERENCES users (id),
   CONSTRAINT fk_feedback_task FOREIGN KEY (task_id) REFERENCES tasks (id),
   CONSTRAINT fk_feedback_handled_by FOREIGN KEY (handled_by) REFERENCES users (id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE system_messages (
+  id INT NOT NULL AUTO_INCREMENT,
+  business_id VARCHAR(32) NOT NULL,
+  subject VARCHAR(200) NOT NULL,
+  content_html LONGTEXT NOT NULL,
+  content_text LONGTEXT NOT NULL,
+  sender_id INT NOT NULL,
+  recipient_scope VARCHAR(20) NOT NULL DEFAULT 'selected',
+  recipient_count INT NOT NULL DEFAULT 0,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (id),
+  UNIQUE KEY uq_system_messages_business_id (business_id),
+  KEY ix_system_messages_subject (subject),
+  KEY ix_system_messages_sender_id (sender_id),
+  KEY ix_system_messages_recipient_scope (recipient_scope),
+  CONSTRAINT fk_system_messages_sender FOREIGN KEY (sender_id) REFERENCES users (id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE system_message_recipients (
+  id INT NOT NULL AUTO_INCREMENT,
+  message_id INT NOT NULL,
+  user_id INT NOT NULL,
+  is_read TINYINT(1) NOT NULL DEFAULT 0,
+  read_at DATETIME DEFAULT NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (id),
+  UNIQUE KEY uq_system_message_recipient_message_user (message_id, user_id),
+  KEY ix_system_message_recipients_message_id (message_id),
+  KEY ix_system_message_recipients_user_id (user_id),
+  KEY ix_system_message_recipients_is_read (is_read),
+  CONSTRAINT fk_system_message_recipients_message FOREIGN KEY (message_id) REFERENCES system_messages (id),
+  CONSTRAINT fk_system_message_recipients_user FOREIGN KEY (user_id) REFERENCES users (id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE regenerate_logs (

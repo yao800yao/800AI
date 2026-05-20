@@ -220,6 +220,55 @@ export interface AdminFeedbackQuery extends FeedbackListQuery {
   feedback_id?: string;
 }
 
+export interface SystemMessageSender {
+  user_id: string;
+  username: string;
+}
+
+export interface SystemMessageRecipient {
+  user_id: string;
+  username: string;
+  email?: string | null;
+  is_read: boolean;
+  read_at?: string | null;
+}
+
+export type SystemMessageRecipientScope = "selected" | "all";
+
+export interface SystemMessageItem {
+  message_id: string;
+  subject: string;
+  content_text: string;
+  sender: SystemMessageSender;
+  recipient_scope: SystemMessageRecipientScope;
+  recipient_count: number;
+  is_read: boolean;
+  read_at?: string | null;
+  created_at?: string | null;
+  updated_at?: string | null;
+}
+
+export interface SystemMessageDetail extends SystemMessageItem {
+  content_html: string;
+  recipients?: SystemMessageRecipient[];
+}
+
+export interface SystemMessageListResponse {
+  total: number;
+  items: SystemMessageItem[];
+}
+
+export interface SystemMessageReadCountResponse {
+  count: number;
+}
+
+export interface SystemMessageCreatePayload {
+  subject: string;
+  content_html: string;
+  recipient_scope: SystemMessageRecipientScope;
+  recipient_user_ids: string[];
+}
+
 export interface AdminUser {
   id: string;
   username: string;

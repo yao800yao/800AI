@@ -53,6 +53,18 @@ const router = createRouter({
           component: () => import("@/views/FeedbackDetailView.vue"),
         },
         {
+          path: "system-messages",
+          name: "SystemMessageList",
+          meta: { requiresAuth: true },
+          component: () => import("@/views/SystemMessageListView.vue"),
+        },
+        {
+          path: "system-messages/:messageId",
+          name: "SystemMessageDetail",
+          meta: { requiresAuth: true },
+          component: () => import("@/views/SystemMessageDetailView.vue"),
+        },
+        {
           path: "settings",
           name: "Settings",
           meta: { requiresAuth: true },
@@ -93,6 +105,12 @@ const router = createRouter({
           name: "AdminFeedbackDetail",
           meta: { requiresAdmin: true },
           component: () => import("@/views/admin/FeedbackDetailView.vue"),
+        },
+        {
+          path: "admin/system-messages",
+          name: "AdminSystemMessageManage",
+          meta: { requiresAdmin: true },
+          component: () => import("@/views/admin/SystemMessageManageView.vue"),
         },
         {
           path: "admin/api-key",
