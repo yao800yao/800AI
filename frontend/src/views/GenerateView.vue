@@ -1681,7 +1681,7 @@ watch(() => auth.isLoggedIn, (isLoggedIn) => {
                             </div>
                             <div class="model-help-grid">
                               <div>Image 2（顶级）</div>
-                              <div>最高保真度，锐利边缘、精细纹理、干净文字</div>
+                              <div>最高保真度，锐利边缘、精细纹理、文字表现最佳</div>
                               <div>最少</div>
                               <div>最终成品、完美文字、高清精度需求（印刷、专业输出、复杂构图）</div>
                             </div>
@@ -1699,7 +1699,7 @@ watch(() => auth.isLoggedIn, (isLoggedIn) => {
                             </div>
                             <div class="model-help-grid">
                               <div>Nano Banana Pro</div>
-                              <div>极致细节、复杂构图、文字表现最佳</div>
+                              <div>极致细节、复杂构图、干净文字</div>
                               <div>最少</div>
                               <div>需要极致细节、复杂构图、文字排版时使用</div>
                             </div>
@@ -1877,7 +1877,7 @@ watch(() => auth.isLoggedIn, (isLoggedIn) => {
                             </div>
                             <div class="model-help-grid">
                               <div>Image 2（顶级）</div>
-                              <div>最高保真度，锐利边缘、精细纹理、干净文字</div>
+                              <div>最高保真度，锐利边缘、精细纹理、文字表现最佳</div>
                               <div>最少</div>
                               <div>最终成品、完美文字、高清精度需求（印刷、专业输出、复杂构图）</div>
                             </div>
@@ -1895,7 +1895,7 @@ watch(() => auth.isLoggedIn, (isLoggedIn) => {
                             </div>
                             <div class="model-help-grid">
                               <div>Nano Banana Pro</div>
-                              <div>极致细节、复杂构图、文字表现最佳</div>
+                              <div>极致细节、复杂构图、干净文字</div>
                               <div>最少</div>
                               <div>需要极致细节、复杂构图、文字排版时使用</div>
                             </div>
