@@ -47,6 +47,7 @@ export interface TaskResult {
   resolution: string;
   custom_size?: string;
   credit_cost: number;
+  credit_refunded?: boolean;
   status: "pending" | "queued" | "processing" | "success" | "failed";
   error_message?: string;
   created_at: string;
@@ -75,6 +76,7 @@ export interface HistoryItem {
   resolution: string;
   custom_size?: string;
   credit_cost: number;
+  credit_refunded?: boolean;
   status: string;
   error_message?: string;
   task_is_deleted?: boolean;
@@ -135,6 +137,7 @@ export interface UserHistoryCard {
   resolution: string;
   custom_size?: string;
   credit_cost: number;
+  credit_refunded?: boolean;
   created_at: string;
   error_message?: string;
   images: ImageResult[];

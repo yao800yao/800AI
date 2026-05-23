@@ -132,6 +132,7 @@ interface GeneratedTaskItem {
   createdAt: string;
   status: GeneratedTaskStatus;
   errorMessage?: string;
+  creditRefunded?: boolean;
   images: ImageResult[];
 }
 
@@ -413,6 +414,7 @@ function createLocalGeneratedTask(taskDraft: GeneratedTaskDraft): GeneratedTaskI
     createdAt: new Date().toISOString(),
     status: "submitting",
     errorMessage: "",
+    creditRefunded: false,
     images: createPendingImages(1),
   };
 }
@@ -509,6 +511,7 @@ function syncTaskFromResult(taskId: string, data: TaskResult) {
     ...task,
     status: data.status,
     errorMessage: nextErrorMessage,
+    creditRefunded: Boolean(data.credit_refunded),
     createdAt: data.created_at || task.createdAt,
     model: data.model || task.model,
     size: data.size || task.size,
@@ -520,7 +523,7 @@ function syncTaskFromResult(taskId: string, data: TaskResult) {
   if (previousStatus !== data.status && (data.status === "success" || data.status === "failed")) {
     data.status === "success"
       ? message.success(`任务 #${taskId} 已完成`)
-      : message.warning(formatGenerationTaskFailureMessage(nextErrorMessage));
+      : message.warning(formatGenerationTaskFailureMessage(nextErrorMessage, Boolean(data.credit_refunded)));
   }
 }
 
@@ -564,12 +567,13 @@ function convertHistoryCardToGeneratedTask(item: UserHistoryCard): GeneratedTask
     createdAt: item.created_at,
     status: item.status as GeneratedTaskStatus,
     errorMessage: item.error_message || item.images.find((image) => image.status === "failed" && image.error_message)?.error_message || "",
+    creditRefunded: Boolean(item.credit_refunded),
     images: item.images.length ? item.images : createPendingImages(fallbackImageCount),
   };
 }
 
 function getGeneratedTaskFailureMessage(task: GeneratedTaskItem, image: ImageResult) {
-  return getPreferredGenerationErrorMessage(task.errorMessage, image.error_message, "生成失败，请重试");
+  return getPreferredGenerationErrorMessage(task.errorMessage, image.error_message, Boolean(task.creditRefunded), "生成失败，请重试");
 }
 
 function isGeneratedResultFailed(task: GeneratedTaskItem, image: ImageResult) {

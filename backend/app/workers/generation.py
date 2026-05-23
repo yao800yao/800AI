@@ -33,7 +33,7 @@ from app.services.external_api_config_service import (
     SCENE_INPAINT,
     should_use_multipart_request,
 )
-from app.services.task_service import refund_task_credit_for_http_failure_if_needed
+from app.services.task_service import refund_task_credit_for_generation_failure_if_needed
 from app.utils.datetime_utils import now_local
 
 logger = logging.getLogger(__name__)
@@ -538,7 +538,7 @@ def _recover_task_after_exception(task_id: int, error_message: str) -> None:
         if task.status == "processing":
             task.status = "failed"
         task.error_message = "" if task.status == "success" else normalized_error
-        refund_task_credit_for_http_failure_if_needed(recovery_db, task)
+        refund_task_credit_for_generation_failure_if_needed(recovery_db, task)
         recovery_db.commit()
     except Exception:
         _rollback_session_safely(recovery_db)
@@ -669,7 +669,7 @@ def _process_task(task_id: int, *, use_distributed_lock: bool = True):
         if not pending_images:
             task.status = _resolve_task_status(images)
             task.error_message = "" if task.status == "success" else (task.error_message or "生图失败")
-            refund_task_credit_for_http_failure_if_needed(db, task)
+            refund_task_credit_for_generation_failure_if_needed(db, task)
             db.commit()
             logger.info(
                 "Task finished without pending images",
@@ -695,7 +695,7 @@ def _process_task(task_id: int, *, use_distributed_lock: bool = True):
             if _mark_task_request_started(task):
                 db.commit()
                 db.refresh(task)
-            result, error_message, http_status_code = _call_gemini_api(
+            result, error_message, _http_status_code = _call_gemini_api(
                 prompt=task.prompt,
                 aspect_ratio=task.size,
                 image_size=task.resolution,
@@ -740,11 +740,7 @@ def _process_task(task_id: int, *, use_distributed_lock: bool = True):
         task.status = "success" if all_success else "failed"
         if task.status == "success":
             task.error_message = ""
-        refund_task_credit_for_http_failure_if_needed(
-            db,
-            task,
-            http_status_code=http_status_code if "http_status_code" in locals() else None,
-        )
+        refund_task_credit_for_generation_failure_if_needed(db, task)
         db.commit()
         logger.info(
             "Task processing finished",

@@ -10,6 +10,7 @@ from app.models.image import Image
 from app.models.task import Task
 from app.services.business_id_service import task_external_id
 from app.services.cos_service import CosRuntimeConfig, get_cos_config
+from app.services.task_service import is_task_generation_failure_credit_refunded
 
 
 def get_optional_cos_config(db: Session) -> CosRuntimeConfig | None:
@@ -118,7 +119,20 @@ def serialize_image(image: Image, *, cos_config: CosRuntimeConfig | None = None)
     }
 
 
-def serialize_task(task: Task, *, cos_config: CosRuntimeConfig | None = None) -> dict:
+def serialize_task(
+    task: Task,
+    *,
+    cos_config: CosRuntimeConfig | None = None,
+    credit_refunded: bool | None = None,
+) -> dict:
+    task_credit_cost = int(task.credit_cost or 0)
+    resolved_credit_refunded = False
+    if credit_refunded is not None:
+        resolved_credit_refunded = bool(credit_refunded)
+    elif task.status == "failed" and task_credit_cost > 0:
+        db = Session.object_session(task)
+        resolved_credit_refunded = bool(db and is_task_generation_failure_credit_refunded(db, task.id))
+
     return {
         "id": task_external_id(task),
         "mode": task.mode or "generate",
@@ -129,7 +143,8 @@ def serialize_task(task: Task, *, cos_config: CosRuntimeConfig | None = None) ->
         "size": task.size,
         "resolution": task.resolution or "",
         "custom_size": task.custom_size or "",
-        "credit_cost": int(task.credit_cost or 0),
+        "credit_cost": task_credit_cost,
+        "credit_refunded": resolved_credit_refunded,
         "status": task.status,
         "error_message": task.error_message or "",
         "created_at": task.created_at,

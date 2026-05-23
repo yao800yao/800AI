@@ -29,6 +29,7 @@ from app.services.image_delivery_service import (
     serialize_image,
 )
 from app.services.business_id_service import task_external_id, user_external_id
+from app.services.task_service import is_task_generation_failure_credit_refunded
 from app.utils.datetime_utils import now_local
 from app.utils.business_id import normalize_business_id
 
@@ -95,6 +96,11 @@ def _serialize_task_history_detail(task: Task, *, cos_config, scene_type_map: di
     mask_asset = serialize_asset_urls(task.mask_image or "", cos_config=cos_config)
     reference_assets = [serialize_asset_urls(ref, cos_config=cos_config) for ref in _parse_refs(task.reference_images)]
     visible_images = _serialize_history_images(task.images, cos_config=cos_config)
+    task_credit_cost = int(task.credit_cost or 0)
+    credit_refunded = False
+    if task.status == "failed" and task_credit_cost > 0:
+        db = Session.object_session(task)
+        credit_refunded = bool(db and is_task_generation_failure_credit_refunded(db, task.id))
     return {
         "history_id": None,
         "item_type": "task",
@@ -126,7 +132,8 @@ def _serialize_task_history_detail(task: Task, *, cos_config, scene_type_map: di
         "size": task.size,
         "resolution": task.resolution or "",
         "custom_size": task.custom_size or "",
-        "credit_cost": int(task.credit_cost or 0),
+        "credit_cost": task_credit_cost,
+        "credit_refunded": credit_refunded,
         "created_at": task.created_at,
         "error_message": task.error_message or "",
         "images": visible_images,
@@ -300,6 +307,10 @@ def get_user_history(
     items = []
     for image in images:
         task = image.task
+        task_credit_cost = int(task.credit_cost or 0)
+        credit_refunded = False
+        if task.status == "failed" and task_credit_cost > 0:
+            credit_refunded = is_task_generation_failure_credit_refunded(db, task.id)
         image_payload = serialize_image(image, cos_config=cos_config)
         source_asset = serialize_asset_urls(task.source_image or "", cos_config=cos_config)
         mask_asset = serialize_asset_urls(task.mask_image or "", cos_config=cos_config)
@@ -337,7 +348,8 @@ def get_user_history(
             "size": task.size,
             "resolution": task.resolution or "",
             "custom_size": task.custom_size or "",
-            "credit_cost": int(task.credit_cost or 0),
+            "credit_cost": task_credit_cost,
+            "credit_refunded": credit_refunded,
             "created_at": task.created_at,
             "error_message": task.error_message or "",
             "images": visible_images,

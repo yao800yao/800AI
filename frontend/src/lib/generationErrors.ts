@@ -23,24 +23,25 @@ function withCreditRefundedSuffix(message: string) {
   return message.endsWith(CREDIT_REFUNDED_SUFFIX) ? message : `${message}${CREDIT_REFUNDED_SUFFIX}`;
 }
 
-export function formatGenerationTaskFailureMessage(rawMessage?: string) {
+export function formatGenerationTaskFailureMessage(rawMessage?: string, creditRefunded = false) {
   const detail = String(rawMessage || "").trim();
   const message = isImageSafetyError(detail) ? IMAGE_SAFETY_ERROR_MESSAGE : GENERATION_TASK_FAILURE_MESSAGE;
-  return withCreditRefundedSuffix(message);
+  return creditRefunded ? withCreditRefundedSuffix(message) : message;
 }
 
 export function getPreferredGenerationErrorMessage(
   taskError?: string,
   imageError?: string,
+  creditRefunded = false,
   _fallback = "生成失败，请重试"
 ) {
-  return formatGenerationTaskFailureMessage(imageError || taskError);
+  return formatGenerationTaskFailureMessage(imageError || taskError, creditRefunded);
 }
 
 export function getTaskImageFailureMessage(
-  task: { error_message?: string } | null | undefined,
+  task: { error_message?: string; credit_refunded?: boolean } | null | undefined,
   image: Pick<ImageResult, "error_message"> | null | undefined,
   fallback = "生成失败，请重试"
 ) {
-  return getPreferredGenerationErrorMessage(task?.error_message, image?.error_message, fallback);
+  return getPreferredGenerationErrorMessage(task?.error_message, image?.error_message, Boolean(task?.credit_refunded), fallback);
 }

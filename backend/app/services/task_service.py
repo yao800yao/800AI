@@ -1,7 +1,6 @@
 from datetime import timedelta
 import logging
 import json
-import re
 from sqlalchemy.orm import Session
 from fastapi import HTTPException, status
 from app.config import settings
@@ -20,43 +19,17 @@ from app.utils.business_id import normalize_business_id
 ACTIVE_TASK_STATUSES = ("pending", "queued", "processing")
 MAX_TASK_PROMPT_LENGTH = 5000
 ENQUEUE_FAILURE_DESCRIPTION = "任务入队失败，返还积分"
-TASK_HTTP_FAILURE_REFUND_DESCRIPTION = "任务失败，返还积分"
+TASK_FAILURE_REFUND_DESCRIPTION = "任务失败，返还积分"
+DAILY_TASK_FAILURE_REFUND_LIMIT = 10
 TASK_SUBMISSION_LOCK_PREFIX = "banana:tasks:submission:user"
 TASK_SUBMISSION_LOCK_TIMEOUT_SECONDS = 30
 TASK_SUBMISSION_LOCK_BLOCKING_TIMEOUT_SECONDS = 5
 PROCESSING_TASK_TIMEOUT_DESCRIPTION = "任务处理超时，已自动关闭"
-HTTP_FAILURE_MESSAGE_PATTERN = re.compile(r"\bHTTP\s+([4-5]\d{2})\b", re.IGNORECASE)
 task_logger = logging.getLogger("app.task")
 
 
 def _is_credit_exempt_user(user: User | None) -> bool:
     return bool(user and user.role == "superadmin")
-
-
-def _is_refundable_http_status_code(status_code: int | None) -> bool:
-    if status_code is None:
-        return False
-    try:
-        normalized_status_code = int(status_code)
-    except (TypeError, ValueError):
-        return False
-    return 400 <= normalized_status_code < 600
-
-
-def _extract_refundable_http_status_code(message: str | None) -> int | None:
-    match = HTTP_FAILURE_MESSAGE_PATTERN.search(message or "")
-    if not match:
-        return None
-    return int(match.group(1))
-
-
-def _task_has_refundable_http_failure(task: Task) -> bool:
-    if _extract_refundable_http_status_code(task.error_message):
-        return True
-    return any(
-        _extract_refundable_http_status_code(image.error_message)
-        for image in task.images
-    )
 
 
 def is_task_credit_refunded(db: Session, task_id: int) -> bool:
@@ -67,7 +40,7 @@ def is_task_credit_refunded(db: Session, task_id: int) -> bool:
             CreditLog.type == "allocate",
             CreditLog.description.in_([
                 ENQUEUE_FAILURE_DESCRIPTION,
-                TASK_HTTP_FAILURE_REFUND_DESCRIPTION,
+                TASK_FAILURE_REFUND_DESCRIPTION,
             ]),
         )
         .first()
@@ -75,18 +48,49 @@ def is_task_credit_refunded(db: Session, task_id: int) -> bool:
     )
 
 
-def refund_task_credit_for_http_failure_if_needed(
+def is_task_generation_failure_credit_refunded(db: Session, task_id: int) -> bool:
+    return (
+        db.query(CreditLog.id)
+        .filter(
+            CreditLog.task_id == task_id,
+            CreditLog.type == "allocate",
+            CreditLog.description == TASK_FAILURE_REFUND_DESCRIPTION,
+        )
+        .first()
+        is not None
+    )
+
+
+def _today_failure_refund_window() -> tuple:
+    today_start = now_local().replace(hour=0, minute=0, second=0, microsecond=0)
+    return today_start, today_start + timedelta(days=1)
+
+
+def get_today_task_failure_refund_count(db: Session, user_id: int) -> int:
+    today_start, tomorrow_start = _today_failure_refund_window()
+    rows = (
+        db.query(CreditLog.id)
+        .filter(
+            CreditLog.user_id == user_id,
+            CreditLog.type == "allocate",
+            CreditLog.description == TASK_FAILURE_REFUND_DESCRIPTION,
+            CreditLog.created_at >= today_start,
+            CreditLog.created_at < tomorrow_start,
+        )
+        .with_for_update()
+        .all()
+    )
+    return len(rows)
+
+
+def refund_task_credit_for_generation_failure_if_needed(
     db: Session,
     task: Task,
-    *,
-    http_status_code: int | None = None,
 ) -> bool:
     if task.status != "failed":
         return False
     credit_cost = int(task.credit_cost or 0)
     if credit_cost <= 0:
-        return False
-    if not _is_refundable_http_status_code(http_status_code) and not _task_has_refundable_http_failure(task):
         return False
 
     if is_task_credit_refunded(db, task.id):
@@ -94,6 +98,21 @@ def refund_task_credit_for_http_failure_if_needed(
 
     try:
         with db.begin_nested():
+            get_user_credit_account(db, task.user_id, for_update=True)
+            today_refund_count = get_today_task_failure_refund_count(db, task.user_id)
+            if today_refund_count >= DAILY_TASK_FAILURE_REFUND_LIMIT:
+                task_logger.info(
+                    "task credit refund skipped due to daily failure refund limit",
+                    extra={
+                        "event": "task.credit.refund_daily_limit_exceeded",
+                        "task_id": task_external_id(task),
+                        "user_id": user_external_id(task.user) if task.user else str(task.user_id),
+                        "credit_cost": credit_cost,
+                        "today_refund_count": today_refund_count,
+                        "daily_limit": DAILY_TASK_FAILURE_REFUND_LIMIT,
+                    },
+                )
+                return False
             apply_user_credit_delta(
                 db,
                 task.user_id,
@@ -104,30 +123,30 @@ def refund_task_credit_for_http_failure_if_needed(
                 user_id=task.user_id,
                 amount=credit_cost,
                 type="allocate",
-                description=TASK_HTTP_FAILURE_REFUND_DESCRIPTION,
+                description=TASK_FAILURE_REFUND_DESCRIPTION,
                 task_id=task.id,
             ))
             db.flush()
     except Exception:
         task_logger.exception(
-            "failed to refund task credit after HTTP failure",
+            "failed to refund task credit after generation failure",
             extra={
                 "event": "task.credit.refund_failed",
                 "task_id": task_external_id(task),
                 "user_id": user_external_id(task.user) if task.user else str(task.user_id),
                 "credit_cost": credit_cost,
-                "http_status_code": http_status_code,
             },
         )
         return False
     task_logger.info(
-        "task credit refunded after HTTP failure",
+        "task credit refunded after generation failure",
         extra={
             "event": "task.credit.refunded",
             "task_id": task_external_id(task),
             "user_id": user_external_id(task.user) if task.user else str(task.user_id),
             "credit_cost": credit_cost,
-            "http_status_code": http_status_code,
+            "today_refund_count": today_refund_count + 1,
+            "daily_limit": DAILY_TASK_FAILURE_REFUND_LIMIT,
         },
     )
     return True

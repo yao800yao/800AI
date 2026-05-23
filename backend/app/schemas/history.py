@@ -35,6 +35,7 @@ class HistoryItem(BaseModel):
     resolution: str = ""
     custom_size: str = ""
     credit_cost: int = 0
+    credit_refunded: bool = False
     status: str
     error_message: str = ""
     task_is_deleted: bool = False
@@ -82,6 +83,7 @@ class UserHistoryCardItem(BaseModel):
     resolution: str = ""
     custom_size: str = ""
     credit_cost: int = 0
+    credit_refunded: bool = False
     created_at: datetime | None = None
     error_message: str = ""
     images: list[HistoryImageOut] = []
