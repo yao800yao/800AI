@@ -29,9 +29,18 @@ from app.services.image_delivery_service import (
     serialize_image,
 )
 from app.services.business_id_service import task_external_id, user_external_id
-from app.services.task_service import is_task_generation_failure_credit_refunded
+from app.services.task_service import (
+    ENQUEUE_FAILURE_DESCRIPTION,
+    TASK_FAILURE_REFUND_DESCRIPTION,
+    is_task_generation_failure_credit_refunded,
+)
 from app.utils.datetime_utils import now_local
 from app.utils.business_id import normalize_business_id
+
+TASK_CREDIT_REFUND_DESCRIPTIONS = (
+    ENQUEUE_FAILURE_DESCRIPTION,
+    TASK_FAILURE_REFUND_DESCRIPTION,
+)
 
 
 def _parse_refs(raw: str | None) -> list[str]:
@@ -76,6 +85,27 @@ def _serialize_history_images(
             continue
         result.append(serialize_image(img, cos_config=cos_config))
     return result
+
+
+def _get_refunded_task_ids(db: Session, task_ids: list[int]) -> set[int]:
+    normalized_ids = [int(task_id) for task_id in task_ids if task_id]
+    if not normalized_ids:
+        return set()
+    return {
+        int(task_id)
+        for (task_id,) in (
+            db.query(CreditLog.task_id)
+            .filter(
+                CreditLog.task_id.in_(normalized_ids),
+                CreditLog.task_id.is_not(None),
+                CreditLog.type == "allocate",
+                CreditLog.description.in_(TASK_CREDIT_REFUND_DESCRIPTIONS),
+            )
+            .distinct()
+            .all()
+        )
+        if task_id
+    }
 
 
 def _serialize_task_history_detail(task: Task, *, cos_config, scene_type_map: dict[str, str] | None = None) -> dict:
@@ -575,9 +605,10 @@ def get_all_history(
 
     tasks = task_query.order_by(Task.created_at.desc()).all()
     reverse_logs = reverse_query.order_by(CreditLog.created_at.desc()).all()
+    refunded_task_ids = _get_refunded_task_ids(db, [task.id for task in tasks])
     total = len(tasks) + len(reverse_logs)
     total_credit_cost = (
-        sum(int(task.credit_cost or 0) for task in tasks)
+        sum(0 if task.id in refunded_task_ids else int(task.credit_cost or 0) for task in tasks)
         + sum(max(0, int(-(log.amount or 0))) for log in reverse_logs)
     )
 
@@ -612,7 +643,7 @@ def get_all_history(
             "size": task.size,
             "resolution": task.resolution or "",
             "custom_size": task.custom_size or "",
-            "credit_cost": int(task.credit_cost or 0),
+            "credit_cost": 0 if task.id in refunded_task_ids else int(task.credit_cost or 0),
             "status": task.status,
             "error_message": task.error_message or "",
             "task_is_deleted": bool(task.is_deleted),

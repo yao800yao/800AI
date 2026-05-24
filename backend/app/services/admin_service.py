@@ -14,6 +14,7 @@ from app.services.prompt_reverse_service import (
     PROMPT_REVERSE_MODE,
     PROMPT_REVERSE_MODEL,
 )
+from app.services.task_service import ENQUEUE_FAILURE_DESCRIPTION, TASK_FAILURE_REFUND_DESCRIPTION
 from app.services.task_type_service import (
     TASK_TYPE_IMAGE_EDIT,
     TASK_TYPE_INPAINT,
@@ -30,6 +31,11 @@ from app.services.user_credit_service import (
 )
 from app.utils.datetime_utils import LOCAL_TZ, now_local, to_local_naive
 from app.utils.security import hash_password
+
+TASK_CREDIT_REFUND_DESCRIPTIONS = (
+    ENQUEUE_FAILURE_DESCRIPTION,
+    TASK_FAILURE_REFUND_DESCRIPTION,
+)
 
 
 def _non_whitelisted_user_filter():
@@ -51,6 +57,27 @@ class AnalyticsRecord:
     task_type: str
     credit_cost: int
     created_at: datetime
+
+
+def _get_refunded_task_ids(db: Session, task_ids: list[int]) -> set[int]:
+    normalized_ids = [int(task_id) for task_id in task_ids if task_id]
+    if not normalized_ids:
+        return set()
+    return {
+        int(task_id)
+        for (task_id,) in (
+            db.query(CreditLog.task_id)
+            .filter(
+                CreditLog.task_id.in_(normalized_ids),
+                CreditLog.task_id.is_not(None),
+                CreditLog.type == "allocate",
+                CreditLog.description.in_(TASK_CREDIT_REFUND_DESCRIPTIONS),
+            )
+            .distinct()
+            .all()
+        )
+        if task_id
+    }
 
 
 def _serialize_user(user: User) -> dict:
@@ -111,8 +138,29 @@ def list_users(db: Session) -> list[dict]:
         .group_by(CreditLog.user_id)
         .all()
     ) if user_ids else []
+    refunded_credit_rows = (
+        db.query(
+            CreditLog.user_id,
+            func.coalesce(func.sum(CreditLog.amount), 0).label("refunded_credits"),
+        )
+        .filter(
+            CreditLog.user_id.in_(user_ids),
+            CreditLog.task_id.is_not(None),
+            CreditLog.type == "allocate",
+            CreditLog.description.in_(TASK_CREDIT_REFUND_DESCRIPTIONS),
+        )
+        .group_by(CreditLog.user_id)
+        .all()
+    ) if user_ids else []
+    refunded_credit_map = {
+        int(row.user_id): int(row.refunded_credits or 0)
+        for row in refunded_credit_rows
+    }
     consumed_credit_map = {
-        int(row.user_id): int(row.consumed_credits or 0)
+        int(row.user_id): max(
+            int(row.consumed_credits or 0) - refunded_credit_map.get(int(row.user_id), 0),
+            0,
+        )
         for row in consumed_credit_rows
     }
     return [
@@ -350,6 +398,18 @@ def get_stats(db: Session) -> dict:
         .filter(User.role != "superadmin", _non_whitelisted_user_filter())
         .scalar()
     )
+    total_refunded_generation_credit = (
+        db.query(func.coalesce(func.sum(CreditLog.amount), 0))
+        .join(User, User.id == CreditLog.user_id)
+        .filter(
+            CreditLog.type == "allocate",
+            CreditLog.task_id.is_not(None),
+            CreditLog.description.in_(TASK_CREDIT_REFUND_DESCRIPTIONS),
+            User.role != "superadmin",
+            _non_whitelisted_user_filter(),
+        )
+        .scalar()
+    )
     total_prompt_reverse_credit_cost = (
         db.query(func.coalesce(func.sum(-CreditLog.amount), 0))
         .join(User, User.id == CreditLog.user_id)
@@ -395,7 +455,10 @@ def get_stats(db: Session) -> dict:
     return {
         "total_users": total_users or 0,
         "total_tasks": int(total_generation_tasks or 0) + int(total_prompt_reverse_tasks or 0),
-        "total_credit_cost": int(total_generation_credit_cost or 0) + int(total_prompt_reverse_credit_cost or 0),
+        "total_credit_cost": max(
+            int(total_generation_credit_cost or 0) - int(total_refunded_generation_credit or 0),
+            0,
+        ) + int(total_prompt_reverse_credit_cost or 0),
         "active_users": len(active_task_user_ids | active_prompt_reverse_user_ids),
     }
 
@@ -654,6 +717,17 @@ def _build_analytics_records(
     mode: str | None = None,
 ) -> list[AnalyticsRecord]:
     scene_type_map = get_task_scene_type_map(db)
+    tasks = _task_query(
+        db,
+        start_date=start_date,
+        end_date=end_date,
+        status_filter=status_filter,
+        user_id=user_id,
+        source=source,
+        model=model,
+        mode=mode,
+    ).all()
+    refunded_task_ids = _get_refunded_task_ids(db, [task.id for task in tasks])
     task_records = [
         AnalyticsRecord(
             user_id=task.user_id,
@@ -662,19 +736,10 @@ def _build_analytics_records(
             model=task.model or "未设置",
             mode=task.mode or "generate",
             task_type=resolve_task_type_for_task(task, scene_type_map=scene_type_map),
-            credit_cost=int(task.credit_cost or 0),
+            credit_cost=0 if task.id in refunded_task_ids else int(task.credit_cost or 0),
             created_at=task.created_at,
         )
-        for task in _task_query(
-            db,
-            start_date=start_date,
-            end_date=end_date,
-            status_filter=status_filter,
-            user_id=user_id,
-            source=source,
-            model=model,
-            mode=mode,
-        ).all()
+        for task in tasks
     ]
 
     prompt_reverse_query = _prompt_reverse_query(
