@@ -765,22 +765,22 @@ function handleEditImage(item: UserHistoryCard) {
     </div>
 
     <div class="history-filter-bar">
-      <a-select v-model:value="typeFilter" placeholder="全部类型" style="width: 160px" allow-clear>
+      <a-select v-model:value="typeFilter" placeholder="全部类型" class="history-filter-control history-filter-select" allow-clear>
         <a-select-option value="text_generate">文生图</a-select-option>
         <a-select-option value="image_edit">图编辑</a-select-option>
         <a-select-option value="inpaint">局部重绘</a-select-option>
         <a-select-option value="promptReverse">提示词反推</a-select-option>
       </a-select>
-      <a-select v-model:value="sourceFilter" placeholder="全部来源" style="width: 140px" allow-clear>
+      <a-select v-model:value="sourceFilter" placeholder="全部来源" class="history-filter-control history-filter-select history-filter-select-sm" allow-clear>
         <a-select-option value="web">Web</a-select-option>
         <a-select-option value="app">App</a-select-option>
       </a-select>
-      <a-select v-model:value="modelFilter" placeholder="全部模型" style="width: 170px" allow-clear>
+      <a-select v-model:value="modelFilter" placeholder="全部模型" class="history-filter-control history-filter-select history-filter-select-lg" allow-clear>
         <a-select-option v-for="option in modelOptions" :key="option.value" :value="option.value">
           {{ option.label }}
         </a-select-option>
       </a-select>
-      <a-select v-model:value="statusFilter" placeholder="全部状态" style="width: 160px" allow-clear>
+      <a-select v-model:value="statusFilter" placeholder="全部状态" class="history-filter-control history-filter-select" allow-clear>
         <a-select-option value="pending">等待中</a-select-option>
         <a-select-option value="processing">处理中</a-select-option>
         <a-select-option value="success">成功</a-select-option>
@@ -790,7 +790,7 @@ function handleEditImage(item: UserHistoryCard) {
         v-if="isAdminHistoryView"
         v-model:value="userFilter"
         placeholder="全部用户"
-        style="width: 190px"
+        class="history-filter-control history-filter-select history-filter-select-user"
         allow-clear
         show-search
         option-filter-prop="label"
@@ -807,15 +807,15 @@ function handleEditImage(item: UserHistoryCard) {
       <a-input
         v-model:value="promptFilter"
         placeholder="按提示词筛选"
-        style="width: min(320px, 100%)"
+        class="history-filter-control history-filter-prompt"
         allow-clear
       />
       <a-range-picker
         v-model:value="dateRangeFilter"
         :placeholder="['开始日期', '结束日期']"
-        style="width: 250px"
+        class="history-filter-control history-filter-date"
       />
-      <a-select v-model:value="gridColumnCount" placeholder="每行列数" style="width: 128px">
+      <a-select v-model:value="gridColumnCount" placeholder="每行列数" class="history-filter-control history-filter-columns">
         <a-select-option :value="5">5 列</a-select-option>
         <a-select-option :value="6">6 列</a-select-option>
         <a-select-option :value="7">7 列</a-select-option>
@@ -1121,10 +1121,44 @@ function handleEditImage(item: UserHistoryCard) {
 .history-filter-bar {
   display: flex;
   gap: 10px;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   align-items: center;
   margin-bottom: 18px;
   animation: history-fade-up var(--motion-duration-reveal-soft) var(--motion-ease-enter) 0.12s both;
+}
+
+.history-filter-control {
+  flex: 0 1 auto;
+  min-width: 0;
+}
+
+.history-filter-select {
+  width: clamp(112px, 8.2vw, 160px);
+}
+
+.history-filter-select-sm {
+  width: clamp(104px, 7.2vw, 140px);
+}
+
+.history-filter-select-lg {
+  width: clamp(180px, 13.2vw, 255px);
+}
+
+.history-filter-select-user {
+  width: clamp(132px, 9.8vw, 190px);
+}
+
+.history-filter-prompt {
+  flex: 1 1 150px;
+  width: clamp(140px, 11vw, 220px);
+}
+
+.history-filter-date {
+  width: clamp(210px, 14vw, 250px);
+}
+
+.history-filter-columns {
+  width: 118px;
 }
 
 .history-filter-tip {
@@ -2008,6 +2042,24 @@ html:is([data-theme="dark"], [data-theme="midnight"]) .history-page .history-ove
   .history-topbar {
     flex-direction: column;
     align-items: stretch;
+  }
+
+  .history-filter-bar {
+    flex-wrap: wrap;
+  }
+
+  .history-filter-select,
+  .history-filter-select-sm,
+  .history-filter-select-lg,
+  .history-filter-select-user,
+  .history-filter-prompt,
+  .history-filter-date {
+    flex: 1 1 160px;
+    width: auto;
+  }
+
+  .history-filter-columns {
+    width: 118px;
   }
 
   .history-batch-bar {
