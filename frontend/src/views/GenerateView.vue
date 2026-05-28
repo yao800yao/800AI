@@ -1808,59 +1808,83 @@ watch(() => auth.isLoggedIn, (isLoggedIn) => {
                 <div class="setting-item setting-item-full">
                   <div class="setting-label-row">
                     <label>选择模型</label>
-                    <div class="model-help">
-                      <a-popover trigger="hover" placement="bottomRight" overlay-class-name="model-help-popover">
-                        <template #content>
-                          <div class="model-help-tip">
-                            <div class="model-help-grid model-help-grid-head">
-                              <div>模型</div>
-                              <div>细节与质量</div>
-                              <div>伪影</div>
-                              <div>推荐使用场景</div>
+                    <div class="model-help-group">
+                      <div class="model-help">
+                        <a-popover trigger="hover" placement="bottomRight" overlay-class-name="model-help-popover">
+                          <template #content>
+                            <div class="model-help-tip batch-mode-tip">
+                              <div class="batch-mode-tip-title">如何连续生成多张图？</div>
+                              <ol class="batch-mode-tip-list">
+                                <li>写好提示词后点击「开始生成」，任务会出现在右侧「生成任务」面板。</li>
+                                <li>提交后左侧内容不会清空，可立即修改提示词、参考图或参数。</li>
+                                <li>再次点击「开始生成」，即可并行发起新任务，无需等待上一张出图。</li>
+                                <li>最多 {{ MAX_ACTIVE_GENERATION_IMAGES }} 张图同时在生成（当前 {{ activeGenerationImageCount }} / {{ MAX_ACTIVE_GENERATION_IMAGES }}）。</li>
+                              </ol>
+                              <div class="batch-mode-tip-note">
+                                也可通过「图片数量」一次发起多张（1–{{ MAX_ACTIVE_GENERATION_IMAGES }} 张），会占用对应数量的并发名额。
+                              </div>
                             </div>
-                            <div class="model-help-grid">
-                              <div>Image 2（顶级）</div>
-                              <div>最高保真度，锐利边缘、精细纹理、文字表现最佳</div>
-                              <div>最少</div>
-                              <div>最终成品、完美文字、高清精度需求（印刷、专业输出、复杂构图）</div>
+                          </template>
+                          <button type="button" class="model-help-trigger">
+                            <AppstoreOutlined />
+                            <span>批量模式</span>
+                          </button>
+                        </a-popover>
+                      </div>
+                      <div class="model-help">
+                        <a-popover trigger="hover" placement="bottomRight" overlay-class-name="model-help-popover">
+                          <template #content>
+                            <div class="model-help-tip">
+                              <div class="model-help-grid model-help-grid-head">
+                                <div>模型</div>
+                                <div>细节与质量</div>
+                                <div>伪影</div>
+                                <div>推荐使用场景</div>
+                              </div>
+                              <div class="model-help-grid">
+                                <div>Image 2（顶级）</div>
+                                <div>最高保真度，锐利边缘、精细纹理、文字表现最佳</div>
+                                <div>最少</div>
+                                <div>最终成品、完美文字、高清精度需求（印刷、专业输出、复杂构图）</div>
+                              </div>
+                              <div class="model-help-grid">
+                                <div>Image 2（高质量）</div>
+                                <div>平衡，细节较好</div>
+                                <div>较少</div>
+                                <div>大多数日常生产用途（社交媒体、网页素材等）</div>
+                              </div>
+                              <div class="model-help-grid">
+                                <div>Image 2（性价比）</div>
+                                <div>较粗糙，细节一般</div>
+                                <div>较多</div>
+                                <div>快速迭代、草稿、缩略图、高频批量生成、成本敏感场景</div>
+                              </div>
+                              <div class="model-help-grid">
+                                <div>Nano Banana Pro</div>
+                                <div>极致细节、复杂构图、干净文字</div>
+                                <div>最少</div>
+                                <div>需要极致细节、复杂构图、文字排版时使用</div>
+                              </div>
+                              <div class="model-help-grid">
+                                <div>Nano Banana 2</div>
+                                <div>接近 Pro，速度与质量平衡最佳</div>
+                                <div>较少</div>
+                                <div>大多数人日常使用首选（性价比最高）</div>
+                              </div>
+                              <div class="model-help-grid">
+                                <div>Nano Banana</div>
+                                <div>一般，适合快速草稿验证</div>
+                                <div>较多</div>
+                                <div>现在较少使用，主要用于低成本快速测试</div>
+                              </div>
                             </div>
-                            <div class="model-help-grid">
-                              <div>Image 2（高质量）</div>
-                              <div>平衡，细节较好</div>
-                              <div>较少</div>
-                              <div>大多数日常生产用途（社交媒体、网页素材等）</div>
-                            </div>
-                            <div class="model-help-grid">
-                              <div>Image 2（性价比）</div>
-                              <div>较粗糙，细节一般</div>
-                              <div>较多</div>
-                              <div>快速迭代、草稿、缩略图、高频批量生成、成本敏感场景</div>
-                            </div>
-                            <div class="model-help-grid">
-                              <div>Nano Banana Pro</div>
-                              <div>极致细节、复杂构图、干净文字</div>
-                              <div>最少</div>
-                              <div>需要极致细节、复杂构图、文字排版时使用</div>
-                            </div>
-                            <div class="model-help-grid">
-                              <div>Nano Banana 2</div>
-                              <div>接近 Pro，速度与质量平衡最佳</div>
-                              <div>较少</div>
-                              <div>大多数人日常使用首选（性价比最高）</div>
-                            </div>
-                            <div class="model-help-grid">
-                              <div>Nano Banana</div>
-                              <div>一般，适合快速草稿验证</div>
-                              <div>较多</div>
-                              <div>现在较少使用，主要用于低成本快速测试</div>
-                            </div>
-                          </div>
-                        </template>
-                        <button type="button" class="model-help-trigger">
-                          <BarChartOutlined />
-                          <span>模型对比</span>
-                        </button>
-                      </a-popover>
+                          </template>
+                          <button type="button" class="model-help-trigger">
+                            <BarChartOutlined />
+                            <span>模型对比</span>
+                          </button>
+                        </a-popover>
+                      </div>
                     </div>
                   </div>
                   <a-select
@@ -2008,59 +2032,83 @@ watch(() => auth.isLoggedIn, (isLoggedIn) => {
                 <div class="setting-item setting-item-full">
                   <div class="setting-label-row">
                     <label>选择模型</label>
-                    <div class="model-help">
-                      <a-popover trigger="hover" placement="bottomRight" overlay-class-name="model-help-popover">
-                        <template #content>
-                          <div class="model-help-tip">
-                            <div class="model-help-grid model-help-grid-head">
-                              <div>模型</div>
-                              <div>细节与质量</div>
-                              <div>伪影</div>
-                              <div>推荐使用场景</div>
+                    <div class="model-help-group">
+                      <div class="model-help">
+                        <a-popover trigger="hover" placement="bottomRight" overlay-class-name="model-help-popover">
+                          <template #content>
+                            <div class="model-help-tip batch-mode-tip">
+                              <div class="batch-mode-tip-title">如何连续生成多张图？</div>
+                              <ol class="batch-mode-tip-list">
+                                <li>写好提示词后点击「开始生成」，任务会出现在右侧「生成任务」面板。</li>
+                                <li>提交后左侧内容不会清空，可立即修改提示词、参考图或参数。</li>
+                                <li>再次点击「开始生成」，即可并行发起新任务，无需等待上一张出图。</li>
+                                <li>最多 {{ MAX_ACTIVE_GENERATION_IMAGES }} 张图同时在生成（当前 {{ activeGenerationImageCount }} / {{ MAX_ACTIVE_GENERATION_IMAGES }}）。</li>
+                              </ol>
+                              <div class="batch-mode-tip-note">
+                                也可通过「图片数量」一次发起多张（1–{{ MAX_ACTIVE_GENERATION_IMAGES }} 张），会占用对应数量的并发名额。
+                              </div>
                             </div>
-                            <div class="model-help-grid">
-                              <div>Image 2（顶级）</div>
-                              <div>最高保真度，锐利边缘、精细纹理、文字表现最佳</div>
-                              <div>最少</div>
-                              <div>最终成品、完美文字、高清精度需求（印刷、专业输出、复杂构图）</div>
+                          </template>
+                          <button type="button" class="model-help-trigger">
+                            <AppstoreOutlined />
+                            <span>批量模式</span>
+                          </button>
+                        </a-popover>
+                      </div>
+                      <div class="model-help">
+                        <a-popover trigger="hover" placement="bottomRight" overlay-class-name="model-help-popover">
+                          <template #content>
+                            <div class="model-help-tip">
+                              <div class="model-help-grid model-help-grid-head">
+                                <div>模型</div>
+                                <div>细节与质量</div>
+                                <div>伪影</div>
+                                <div>推荐使用场景</div>
+                              </div>
+                              <div class="model-help-grid">
+                                <div>Image 2（顶级）</div>
+                                <div>最高保真度，锐利边缘、精细纹理、文字表现最佳</div>
+                                <div>最少</div>
+                                <div>最终成品、完美文字、高清精度需求（印刷、专业输出、复杂构图）</div>
+                              </div>
+                              <div class="model-help-grid">
+                                <div>Image 2（高质量）</div>
+                                <div>平衡，细节较好</div>
+                                <div>较少</div>
+                                <div>大多数日常生产用途（社交媒体、网页素材等）</div>
+                              </div>
+                              <div class="model-help-grid">
+                                <div>Image 2（性价比）</div>
+                                <div>较粗糙，细节一般</div>
+                                <div>较多</div>
+                                <div>快速迭代、草稿、缩略图、高频批量生成、成本敏感场景</div>
+                              </div>
+                              <div class="model-help-grid">
+                                <div>Nano Banana Pro</div>
+                                <div>极致细节、复杂构图、干净文字</div>
+                                <div>最少</div>
+                                <div>需要极致细节、复杂构图、文字排版时使用</div>
+                              </div>
+                              <div class="model-help-grid">
+                                <div>Nano Banana 2</div>
+                                <div>接近 Pro，速度与质量平衡最佳</div>
+                                <div>较少</div>
+                                <div>大多数人日常使用首选（性价比最高）</div>
+                              </div>
+                              <div class="model-help-grid">
+                                <div>Nano Banana</div>
+                                <div>一般，适合快速草稿验证</div>
+                                <div>较多</div>
+                                <div>已较少使用，主要用于低成本快速测试</div>
+                              </div>
                             </div>
-                            <div class="model-help-grid">
-                              <div>Image 2（高质量）</div>
-                              <div>平衡，细节较好</div>
-                              <div>较少</div>
-                              <div>大多数日常生产用途（社交媒体、网页素材等）</div>
-                            </div>
-                            <div class="model-help-grid">
-                              <div>Image 2（性价比）</div>
-                              <div>较粗糙，细节一般</div>
-                              <div>较多</div>
-                              <div>快速迭代、草稿、缩略图、高频批量生成、成本敏感场景</div>
-                            </div>
-                            <div class="model-help-grid">
-                              <div>Nano Banana Pro</div>
-                              <div>极致细节、复杂构图、干净文字</div>
-                              <div>最少</div>
-                              <div>需要极致细节、复杂构图、文字排版时使用</div>
-                            </div>
-                            <div class="model-help-grid">
-                              <div>Nano Banana 2</div>
-                              <div>接近 Pro，速度与质量平衡最佳</div>
-                              <div>较少</div>
-                              <div>大多数人日常使用首选（性价比最高）</div>
-                            </div>
-                            <div class="model-help-grid">
-                              <div>Nano Banana</div>
-                              <div>一般，适合快速草稿验证</div>
-                              <div>较多</div>
-                              <div>已较少使用，主要用于低成本快速测试</div>
-                            </div>
-                          </div>
-                        </template>
-                        <button type="button" class="model-help-trigger">
-                          <BarChartOutlined />
-                          <span>模型对比</span>
-                        </button>
-                      </a-popover>
+                          </template>
+                          <button type="button" class="model-help-trigger">
+                            <BarChartOutlined />
+                            <span>模型对比</span>
+                          </button>
+                        </a-popover>
+                      </div>
                     </div>
                   </div>
                   <a-select
@@ -3527,6 +3575,13 @@ watch(() => auth.isLoggedIn, (isLoggedIn) => {
 
 .setting-label-row label {
   margin-bottom: 0;
+}
+
+.model-help-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  flex: 0 0 auto;
 }
 
 .model-help {
@@ -5086,6 +5141,39 @@ html:is([data-theme="dark"], [data-theme="midnight"]) .generate-page .result-mor
   .model-help-tip {
     width: min(620px, calc(100vw - 68px));
     color: #f5f5f5;
+  }
+
+  .batch-mode-tip {
+    width: min(420px, calc(100vw - 68px));
+  }
+
+  .batch-mode-tip-title {
+    margin-bottom: 10px;
+    color: #ffffff;
+    font-size: 14px;
+    font-weight: 800;
+    line-height: 1.4;
+  }
+
+  .batch-mode-tip-list {
+    margin: 0;
+    padding-left: 18px;
+    color: #f5f5f5;
+    font-size: 13px;
+    line-height: 1.65;
+  }
+
+  .batch-mode-tip-list li + li {
+    margin-top: 8px;
+  }
+
+  .batch-mode-tip-note {
+    margin-top: 12px;
+    padding-top: 12px;
+    border-top: 1px solid rgba(255, 255, 255, 0.08);
+    color: rgba(245, 245, 245, 0.82);
+    font-size: 12px;
+    line-height: 1.6;
   }
 }
 
