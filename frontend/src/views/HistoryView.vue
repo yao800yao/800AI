@@ -24,6 +24,11 @@ import FeedbackDialog from "@/components/feedback/FeedbackDialog.vue";
 import HistoryDetailDialog from "@/components/history/HistoryDetailDialog.vue";
 import { withBaseUrl } from "@/lib/assets";
 import { useAuthStore } from "@/stores/auth";
+import {
+  HISTORY_GRID_COLUMN_COUNT_KEY,
+  readStoredGridColumnCount,
+  writeStoredGridColumnCount,
+} from "@/lib/gridColumnPreference";
 import type { AdminUser, CreditLog, GenerationModelOption, TaskSceneConfig, TaskSource, TaskType, UserHistoryCard } from "@/types";
 
 const props = withDefaults(defineProps<{
@@ -39,7 +44,16 @@ const page = ref(1);
 const pageSize = ref(20);
 const loading = ref(false);
 const loadingMore = ref(false);
-const gridColumnCount = ref<5 | 6 | 7 | 8>(6);
+const HISTORY_GRID_COLUMN_OPTIONS = [5, 6, 7, 8] as const;
+type HistoryGridColumnOption = typeof HISTORY_GRID_COLUMN_OPTIONS[number];
+const DEFAULT_HISTORY_GRID_COLUMN_COUNT: HistoryGridColumnOption = 6;
+const gridColumnCount = ref<HistoryGridColumnOption>(
+  readStoredGridColumnCount(
+    HISTORY_GRID_COLUMN_COUNT_KEY,
+    HISTORY_GRID_COLUMN_OPTIONS,
+    DEFAULT_HISTORY_GRID_COLUMN_COUNT,
+  ),
+);
 const typeFilter = ref<TaskType | undefined>(undefined);
 const sourceFilter = ref<TaskSource | undefined>(undefined);
 const modelFilter = ref<string | undefined>(undefined);
@@ -124,6 +138,10 @@ const hasMoreHistory = computed(() => items.value.length < total.value);
 const historyGridStyle = computed(() => ({
   "--history-grid-columns": String(gridColumnCount.value),
 }));
+
+watch(gridColumnCount, (count) => {
+  writeStoredGridColumnCount(HISTORY_GRID_COLUMN_COUNT_KEY, count);
+});
 
 const currentPageIds = computed(() => (
   items.value
@@ -1166,6 +1184,7 @@ function handleEditImage(item: UserHistoryCard) {
 
 <style scoped lang="scss">
 .history-page {
+  gap: 10px;
   animation: history-page-enter var(--motion-duration-reveal) ease both;
 }
 
@@ -1205,7 +1224,7 @@ function handleEditImage(item: UserHistoryCard) {
   align-items: flex-start;
   justify-content: space-between;
   gap: 12px;
-  margin-bottom: 6px;
+  margin-bottom: 3px;
   animation: history-fade-up var(--motion-duration-reveal) var(--motion-ease-enter) 0.04s both;
 }
 
@@ -1232,16 +1251,88 @@ function handleEditImage(item: UserHistoryCard) {
   flex-wrap: wrap;
   font-size: 13px;
   color: #9b825f;
-  padding-top: 6px;
+  padding-top: 3px;
 }
 
 .history-filter-bar {
   display: flex;
   gap: 10px;
+  row-gap: 5px;
   flex-wrap: nowrap;
   align-items: center;
-  margin-bottom: 18px;
+  margin-bottom: 9px;
   animation: history-fade-up var(--motion-duration-reveal-soft) var(--motion-ease-enter) 0.12s both;
+
+  :deep(.ant-select-single:not(.ant-select-customize-input) .ant-select-selector) {
+    height: 30px !important;
+    min-height: 30px !important;
+  }
+
+  :deep(.ant-select-selection-item),
+  :deep(.ant-select-selection-placeholder) {
+    line-height: 28px !important;
+  }
+
+  :deep(.ant-select-selection-search-input) {
+    height: 28px !important;
+  }
+
+  :deep(.ant-input),
+  :deep(.ant-input-affix-wrapper) {
+    height: 30px !important;
+    min-height: 30px !important;
+    padding-block: 0 !important;
+  }
+
+  :deep(.ant-input-affix-wrapper .ant-input) {
+    height: 28px !important;
+    line-height: 28px !important;
+  }
+
+  :deep(.ant-input-affix-wrapper .ant-input-suffix) {
+    line-height: 28px;
+  }
+
+  :deep(.history-filter-prompt.ant-input-affix-wrapper) {
+    overflow: hidden;
+  }
+
+  :deep(.history-filter-prompt.ant-input-affix-wrapper .ant-input) {
+    height: 28px !important;
+    line-height: 28px !important;
+    padding: 0 !important;
+    border: none !important;
+    background: transparent !important;
+    box-shadow: none !important;
+  }
+
+  :deep(.history-filter-prompt.ant-input-affix-wrapper .ant-input:hover),
+  :deep(.history-filter-prompt.ant-input-affix-wrapper .ant-input:focus) {
+    border: none !important;
+    background: transparent !important;
+    box-shadow: none !important;
+    transform: none !important;
+  }
+
+  :deep(.history-filter-prompt.ant-input-affix-wrapper:hover) {
+    transform: none !important;
+  }
+
+  :deep(.history-filter-prompt.ant-input-affix-wrapper-focused) {
+    transform: none !important;
+    box-shadow: 0 0 0 3px var(--theme-focus-ring) !important;
+  }
+
+  :deep(.ant-picker) {
+    height: 30px !important;
+    min-height: 30px !important;
+    padding-block: 0 !important;
+  }
+
+  :deep(.ant-picker .ant-picker-input > input) {
+    height: 28px !important;
+    line-height: 28px !important;
+  }
 }
 
 .history-filter-control {
@@ -1275,7 +1366,7 @@ function handleEditImage(item: UserHistoryCard) {
 }
 
 .history-filter-columns {
-  width: 118px;
+  width: 70px;
 }
 
 .history-filter-tip {
@@ -1284,7 +1375,7 @@ function handleEditImage(item: UserHistoryCard) {
 }
 
 .history-filter-btn {
-  height: 34px;
+  height: 30px;
   border-radius: 11px;
   font-size: 13px;
   font-weight: 600;
@@ -1329,7 +1420,7 @@ function handleEditImage(item: UserHistoryCard) {
 }
 
 .batch-mode-btn {
-  width: 32px;
+  width: 30px;
   border-radius: 10px;
   padding: 0 !important;
   border-color: var(--theme-panel-border-strong) !important;
@@ -2302,7 +2393,7 @@ html:is([data-theme="dark"], [data-theme="midnight"]) .history-page .history-ove
   }
 
   .history-filter-columns {
-    width: 118px;
+    width: 70px;
   }
 
   .history-batch-bar {

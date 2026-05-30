@@ -46,6 +46,11 @@ import {
   getPreferredGenerationErrorMessage,
 } from "@/lib/generationErrors";
 import { setStoredUserCompletedUnreadFeedbackCount } from "@/lib/userFeedbackNotice";
+import {
+  GENERATE_RESULT_COLUMN_COUNT_KEY,
+  readStoredGridColumnCount,
+  writeStoredGridColumnCount,
+} from "@/lib/gridColumnPreference";
 import type { GenerationModelOption, ImageResult, PromptHistoryItem, SceneOptionItem, TaskResult, TaskSceneConfig, UserHistoryCard } from "@/types";
 
 const auth = useAuthStore();
@@ -193,6 +198,17 @@ const feedbackTarget = ref<{
   createdAt: string;
 } | null>(null);
 const viewportWidth = ref(typeof window === "undefined" ? 1200 : window.innerWidth);
+const RESULT_COLUMN_OPTIONS = [2, 3, 4] as const;
+type ResultColumnOption = typeof RESULT_COLUMN_OPTIONS[number];
+const DEFAULT_RESULT_COLUMN_COUNT: ResultColumnOption = 3;
+
+const preferredResultColumnCount = ref<ResultColumnOption>(
+  readStoredGridColumnCount(
+    GENERATE_RESULT_COLUMN_COUNT_KEY,
+    RESULT_COLUMN_OPTIONS,
+    DEFAULT_RESULT_COLUMN_COUNT,
+  ),
+);
 
 const historyVisible = ref(false);
 const historyItems = ref<PromptHistoryItem[]>([]);
@@ -456,8 +472,16 @@ const resultItems = computed(() => (
 
 const resultColumnCount = computed(() => {
   if (viewportWidth.value <= 640) return 1;
-  if (viewportWidth.value <= 960) return 2;
-  return 3;
+  if (viewportWidth.value <= 960) return Math.min(2, preferredResultColumnCount.value);
+  return preferredResultColumnCount.value;
+});
+
+const resultListStyle = computed(() => ({
+  gridTemplateColumns: `repeat(${resultColumnCount.value}, minmax(0, 1fr))`,
+}));
+
+watch(preferredResultColumnCount, (count) => {
+  writeStoredGridColumnCount(GENERATE_RESULT_COLUMN_COUNT_KEY, count);
 });
 
 const resultColumns = computed(() => {
@@ -2539,9 +2563,6 @@ watch(() => auth.isLoggedIn, (isLoggedIn) => {
       <section class="work-panel result-panel">
         <div class="result-head">
           <div class="result-head-main">
-            <div class="panel-head result-panel-head">
-              <h3>生成任务</h3>
-            </div>
             <div class="result-tips">
               <div class="result-tip-line">
                 每日前 10 次失败任务不扣积分，所有任务可在
@@ -2550,15 +2571,26 @@ watch(() => auth.isLoggedIn, (isLoggedIn) => {
               </div>
             </div>
           </div>
-          <div class="result-retain-badge">
-            <ExclamationCircleFilled class="result-retain-icon" />
-            <span>服务器只保留原图15天</span>
+          <div class="result-head-meta">
+            <a-select
+              v-model:value="preferredResultColumnCount"
+              placeholder="每行列数"
+              class="history-filter-control history-filter-columns"
+            >
+              <a-select-option :value="2">2 列</a-select-option>
+              <a-select-option :value="3">3 列</a-select-option>
+              <a-select-option :value="4">4 列</a-select-option>
+            </a-select>
+            <div class="result-retain-badge">
+              <ExclamationCircleFilled class="result-retain-icon" />
+              <span>服务器只保留原图15天</span>
+            </div>
           </div>
         </div>
 
         <div class="result-body">
           <template v-if="resultItems.length">
-            <div class="result-list">
+            <div class="result-list" :style="resultListStyle">
               <TransitionGroup
                 v-for="(column, columnIndex) in resultColumns"
                 :key="`result-column-${columnIndex}`"
@@ -2844,7 +2876,7 @@ watch(() => auth.isLoggedIn, (isLoggedIn) => {
 
 .generate-workbench {
   display: grid;
-  grid-template-columns: 382fr 618fr;
+  grid-template-columns: 35fr 65fr;
   gap: 20px;
   align-items: stretch;
   min-height: 100%;
@@ -4183,13 +4215,15 @@ watch(() => auth.isLoggedIn, (isLoggedIn) => {
 
 .result-head {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   justify-content: space-between;
   gap: 12px;
 }
 
 .result-head-main {
   min-width: 0;
+  display: flex;
+  align-items: center;
 }
 
 .result-panel-head {
@@ -4209,12 +4243,55 @@ watch(() => auth.isLoggedIn, (isLoggedIn) => {
   line-height: 1.6;
 }
 
+.result-head-meta {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.result-head-meta :deep(.history-filter-control) {
+  flex: 0 1 auto;
+  min-width: 0;
+}
+
+.result-head-meta :deep(.history-filter-columns) {
+  width: 70px;
+}
+
+.result-head-meta :deep(.history-filter-columns.ant-select) {
+  height: 30px;
+
+  .ant-select-selector {
+    height: 30px !important;
+    min-height: 30px !important;
+    padding: 0 8px !important;
+    border-radius: 999px;
+  }
+
+  .ant-select-selection-search-input {
+    height: 28px !important;
+  }
+
+  .ant-select-selection-item,
+  .ant-select-selection-placeholder {
+    line-height: 28px !important;
+    font-size: 12px;
+  }
+
+  &:not(.ant-select-disabled):hover .ant-select-selector,
+  &.ant-select-focused .ant-select-selector {
+    transform: none;
+  }
+}
+
 .result-retain-badge {
   flex: 0 0 auto;
   display: inline-flex;
   align-items: center;
   gap: 8px;
-  padding: 8px 14px;
+  height: 30px;
+  padding: 0 14px;
   border-radius: 999px;
   background: linear-gradient(180deg, rgba(var(--theme-surface-strong-rgb), 0.96), rgba(var(--theme-page-base-rgb), 0.92));
   border: 1px solid var(--theme-panel-border);
@@ -4243,7 +4320,6 @@ watch(() => auth.isLoggedIn, (isLoggedIn) => {
 
 .result-list {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
   align-items: start;
   gap: 12px;
   margin-top: 12px;
@@ -4907,10 +4983,6 @@ html:is([data-theme="dark"], [data-theme="midnight"]) .generate-page .result-mor
     height: auto;
   }
 
-  .result-list {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-
   .result-body {
     overflow-y: visible;
     padding-right: 0;
@@ -5024,8 +5096,8 @@ html:is([data-theme="dark"], [data-theme="midnight"]) .generate-page .result-mor
     height: 60px;
   }
 
-  .result-list {
-    grid-template-columns: 1fr;
+  .result-head-meta {
+    align-self: flex-start;
   }
 
   .result-head {
