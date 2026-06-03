@@ -8,7 +8,8 @@ from sqlalchemy.orm import Session, joinedload
 from app.models.credit_redeem_key import CreditRedeemKey
 from app.models.user import User
 from app.services.business_id_service import user_external_id
-from app.services.user_credit_service import change_user_credit_balance, get_user_credit_balance
+from app.services.user_credit_service import change_user_credit_balance, get_user_credit_account, get_user_credit_balance
+from app.services.wecom_notify_service import send_wecom_markdown
 from app.utils.datetime_utils import now_local
 
 REDEEM_KEY_ALPHABET = string.ascii_uppercase + string.digits
@@ -44,6 +45,24 @@ def _serialize_redeem_key(row: CreditRedeemKey) -> dict:
         "created_by_username": creator.username if creator else "",
         "created_at": row.created_at,
     }
+
+
+def _send_redeem_success_notification(db: Session, *, row: CreditRedeemKey, user: User) -> None:
+    username = (user.username or "").strip() or f"ID {user.id}"
+    email = (user.email or "").strip()
+    user_label = f"{username} ({email})" if email else username
+    credit_account = get_user_credit_account(db, user.id, create_if_missing=False)
+    remain_credit = int(credit_account.remain_credit or 0) if credit_account else 0
+    used_credit = int(credit_account.used_credit or 0) if credit_account else 0
+    send_wecom_markdown(
+        "## 🎁 兑换码兑换成功\n"
+        f"> 👤 用户: **{user_label}**\n"
+        f"> 🔑 兑换码: `{row.redeem_key}`\n"
+        f"> ✨ 兑换积分: **{int(row.credit_amount or 0)}**\n"
+        f"> 📉 已使用积分: **{used_credit}**\n"
+        f"> 🪙 剩余积分: **{remain_credit}**\n"
+        f"> ⏰ 兑换时间: {now_local().strftime('%Y-%m-%d %H:%M:%S')}"
+    )
 
 
 def create_redeem_key_batch(db: Session, *, count: int, credit_amount: int, admin_user: User) -> dict:
@@ -205,6 +224,7 @@ def redeem_credit_key(db: Session, *, redeem_key: str, user: User) -> dict:
     )
     db.commit()
     db.refresh(row)
+    _send_redeem_success_notification(db, row=row, user=user)
 
     return {
         "message": "兑换成功",
