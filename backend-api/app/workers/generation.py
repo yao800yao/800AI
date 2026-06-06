@@ -175,6 +175,34 @@ def _extract_image_from_url_value(image_url: object) -> tuple[tuple[bytes, str] 
     return result, ""
 
 
+def _extract_first_inline_image_from_parts(payload: dict) -> tuple[tuple[bytes, str] | None, str]:
+    candidates = payload.get("candidates", [])
+    if not candidates:
+        return None, ""
+
+    for part in candidates[0].get("content", {}).get("parts", []):
+        if not isinstance(part, dict):
+            continue
+        inline = part.get("inlineData")
+        if not isinstance(inline, dict):
+            continue
+        b64_str = inline.get("data")
+        if not isinstance(b64_str, str) or not b64_str.strip():
+            continue
+        mime = str(inline.get("mimeType") or "image/png")
+        try:
+            img_bytes = base64.b64decode(b64_str)
+        except Exception as exc:
+            return None, _clip_error_message(f"生图接口返回的 base64 数据解析失败: {exc}")
+        logger.info(
+            "Generation API success from inlineData parts fallback, mime=%s, image size: %d bytes",
+            mime,
+            len(img_bytes),
+        )
+        return (img_bytes, mime), ""
+    return None, ""
+
+
 def _extract_configured_image_url_data(
     payload: dict,
     field_path: str,
@@ -221,12 +249,21 @@ def _extract_configured_image_data(
         fallback_result, fallback_error = _extract_configured_image_url_data(payload, field_path, parent)
         if fallback_result:
             return fallback_result, ""
+        parts_result, parts_error = _extract_first_inline_image_from_parts(payload)
+        if parts_result:
+            logger.info(
+                "Generation API fallback to first inlineData part succeeded: configured_field=%s",
+                field_path,
+            )
+            return parts_result, ""
         preview = _clip_response_preview(payload)
         logger.warning(
             "Generation API configured field missing: path=%s, response_preview=%s",
             field_path,
             preview,
         )
+        if parts_error:
+            return None, parts_error
         if fallback_error:
             return None, fallback_error
         return None, _clip_error_message(
@@ -251,17 +288,11 @@ def _extract_legacy_image_data(payload: dict) -> tuple[tuple[bytes, str] | None,
             f"生图接口返回内容缺少 candidates: {str(payload)[:300]}"
         )
 
-    for part in candidates[0].get("content", {}).get("parts", []):
-        inline = part.get("inlineData")
-        if inline:
-            b64_str = inline["data"]
-            mime = inline.get("mimeType", "image/png")
-            img_bytes = base64.b64decode(b64_str)
-            logger.info(
-                "Generation API success, mime=%s, image size: %d bytes",
-                mime, len(img_bytes),
-            )
-            return (img_bytes, mime), ""
+    result, error_message = _extract_first_inline_image_from_parts(payload)
+    if result:
+        return result, ""
+    if error_message:
+        return None, error_message
 
     logger.warning("Generation API response has no inlineData in parts")
     return None, "生图接口返回内容缺少图片数据 inlineData"
