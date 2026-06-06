@@ -7,7 +7,7 @@ import { BugOutlined } from "@ant-design/icons-vue";
 import { getAdminErrorAnalytics } from "@/api/admin";
 import { getGenerationModels, getTaskScenes } from "@/api/config";
 import { isSessionExpiredError } from "@/lib/authError";
-import type { AdminErrorAnalytics, GenerationModelOption, TaskSceneConfig } from "@/types";
+import type { AdminErrorAnalytics, AdminErrorAnalyticsItem, GenerationModelOption, TaskSceneConfig } from "@/types";
 
 type DatePreset = "today" | "3d" | "7d" | "30d";
 
@@ -123,6 +123,10 @@ async function load() {
   }
 }
 
+function getErrorRowKey(record: AdminErrorAnalytics["items"][number]) {
+  return record.error_message;
+}
+
 onMounted(async () => {
   applyPreset("today");
   await loadModelOptions();
@@ -211,7 +215,7 @@ onMounted(async () => {
         :data-source="analytics?.items || []"
         :loading="loading"
         :pagination="false"
-        :row-key="(record: { error_message: string }) => record.error_message"
+        :row-key="getErrorRowKey"
       >
         <template #bodyCell="{ column, record }">
           <template v-if="column.dataIndex === 'count'">
