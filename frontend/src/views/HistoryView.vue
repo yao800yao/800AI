@@ -15,7 +15,7 @@ import {
   ReloadOutlined,
 } from "@ant-design/icons-vue";
 import { useRouter } from "vue-router";
-import { getAdminHistoryCards, getCreditLogs as getAdminCreditLogs, listUsers } from "@/api/admin";
+import { getAdminHistoryCards, getCreditLogs as getAdminCreditLogs, listPaymentOrders, listUsers } from "@/api/admin";
 import { getGenerationModels, getTaskScenes } from "@/api/config";
 import { deleteHistoryTask, fetchHistory, toggleHistoryPin } from "@/api/history";
 import { getDisplayImageUrl, getDownloadUrl, getPreviewImageUrl, resolveImageUrl } from "@/api/images";
@@ -29,7 +29,7 @@ import {
   readStoredGridColumnCount,
   writeStoredGridColumnCount,
 } from "@/lib/gridColumnPreference";
-import type { AdminUser, CreditLog, GenerationModelOption, TaskSceneConfig, TaskSource, TaskType, UserHistoryCard } from "@/types";
+import type { AdminPaymentOrder, AdminUser, CreditLog, GenerationModelOption, TaskSceneConfig, TaskSource, TaskType, UserHistoryCard } from "@/types";
 
 const props = withDefaults(defineProps<{
   adminUserTasks?: boolean;
@@ -107,6 +107,8 @@ const userInfoLoading = ref(false);
 const selectedUserInfo = ref<AdminUser | null>(null);
 const selectedUserRedeemLogs = ref<CreditLog[]>([]);
 const selectedUserRedeemTotal = ref(0);
+const selectedUserPurchaseOrders = ref<AdminPaymentOrder[]>([]);
+const selectedUserPurchaseTotal = ref(0);
 
 const modelOptions = computed(() => {
   const optionMap = new Map<string, string>();
@@ -442,14 +444,21 @@ async function openUserInfoDialog(item: UserHistoryCard) {
   };
   selectedUserRedeemLogs.value = [];
   selectedUserRedeemTotal.value = 0;
+  selectedUserPurchaseOrders.value = [];
+  selectedUserPurchaseTotal.value = 0;
   userInfoDialogOpen.value = true;
   userInfoLoading.value = true;
   try {
-    const res = await getAdminCreditLogs(1, 5, item.user_id, undefined, undefined, undefined, "redeem");
-    selectedUserRedeemLogs.value = res.items;
-    selectedUserRedeemTotal.value = res.total;
+    const [redeemRes, purchaseRes] = await Promise.all([
+      getAdminCreditLogs(1, 5, item.user_id, undefined, undefined, undefined, "redeem"),
+      listPaymentOrders({ page: 1, page_size: 5, user: item.user_id, status: "credited" }),
+    ]);
+    selectedUserRedeemLogs.value = redeemRes.items;
+    selectedUserRedeemTotal.value = redeemRes.total;
+    selectedUserPurchaseOrders.value = purchaseRes.items;
+    selectedUserPurchaseTotal.value = purchaseRes.total;
   } catch {
-    message.error("获取用户积分兑换记录失败");
+    message.error("获取用户积分记录失败");
   } finally {
     userInfoLoading.value = false;
   }
@@ -1178,6 +1187,24 @@ function handleEditImage(item: UserHistoryCard) {
               <span>兑换记录</span>
               <strong>{{ selectedUserRedeemTotal }}</strong>
             </div>
+            <div class="user-info-stat-card">
+              <span>购买记录</span>
+              <strong>{{ selectedUserPurchaseTotal }}</strong>
+            </div>
+          </div>
+
+          <div class="user-info-section">
+            <div class="user-info-section-title">最近在线购买记录</div>
+            <div v-if="selectedUserPurchaseOrders.length" class="user-redeem-list">
+              <div v-for="order in selectedUserPurchaseOrders" :key="order.order_no" class="user-redeem-item">
+                <div>
+                  <strong>+{{ order.credits }} 积分</strong>
+                  <span>{{ order.subject || "积分购买" }} · ¥{{ order.amount_yuan.toFixed(2) }}</span>
+                </div>
+                <small>{{ formatTime(order.credited_at || order.paid_at || order.created_at) }}</small>
+              </div>
+            </div>
+            <a-empty v-else description="暂无在线购买记录" />
           </div>
 
           <div class="user-info-section">
@@ -1724,7 +1751,7 @@ function handleEditImage(item: UserHistoryCard) {
 
 .user-info-stats {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 10px;
 }
 
