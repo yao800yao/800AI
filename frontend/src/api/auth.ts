@@ -6,6 +6,9 @@ import type {
   AnnouncementConfig,
   PromptHistoryItem,
   RedeemCreditResult,
+  PromoCodeListResponse,
+  PromoReferralListResponse,
+  PromoReferralActivityListResponse,
 } from "@/types";
 
 export function login(account: string, password: string): Promise<LoginResponse> {
@@ -16,8 +19,18 @@ export function login(account: string, password: string): Promise<LoginResponse>
   });
 }
 
-export function register(username: string, email: string, password: string): Promise<LoginResponse> {
-  return client.post("/auth/register", { username, email, password });
+export function register(
+  username: string,
+  email: string,
+  password: string,
+  promoCode?: string,
+): Promise<LoginResponse> {
+  return client.post("/auth/register", {
+    username,
+    email,
+    password,
+    promo_code: promoCode?.trim() || undefined,
+  });
 }
 
 export function changePassword(oldPassword: string, newPassword: string): Promise<any> {
@@ -87,4 +100,44 @@ export function getContactConfig(): Promise<{ contact_qr_image: string }> {
 
 export function getAnnouncementConfig(): Promise<AnnouncementConfig> {
   return client.get("/config/announcement");
+}
+
+export function getMyPromoCodes(): Promise<PromoCodeListResponse> {
+  return client.get("/auth/promo-codes/me");
+}
+
+export function createPromoCode(platformName: string): Promise<PromoCodeListResponse> {
+  return client.post("/auth/promo-codes", { platform_name: platformName });
+}
+
+export function updatePromoCodePlatform(promoCodeId: number, platformName: string): Promise<PromoCodeListResponse> {
+  return client.patch(`/auth/promo-codes/${promoCodeId}`, { platform_name: platformName });
+}
+
+export function getMyPromoReferrals(): Promise<PromoReferralListResponse> {
+  return client.get("/auth/promo-referrals");
+}
+
+export function getMyPromoReferralsWithFilters(params: {
+  keyword?: string;
+  platform_name?: string;
+  start_date?: string;
+  end_date?: string;
+}): Promise<PromoReferralListResponse> {
+  return client.get("/auth/promo-referrals", { params });
+}
+
+export function getMyPromoReferralActivities(params: {
+  keyword?: string;
+  platform_name?: string;
+  start_date?: string;
+  end_date?: string;
+}): Promise<PromoReferralActivityListResponse> {
+  return client.get("/auth/promo-referral-activities", { params });
+}
+
+export function validatePromoCode(code: string): Promise<{ valid: boolean; code: string; platform_name: string }> {
+  return client.get("/auth/promo-codes/validate", {
+    params: { code },
+  });
 }

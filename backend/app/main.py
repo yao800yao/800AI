@@ -92,6 +92,8 @@ def on_startup():
     _ensure_user_api_key_schema()
     _drop_legacy_user_credits_column()
     _ensure_user_whitelist_column()
+    _ensure_user_referral_schema()
+    _ensure_user_promo_code_schema()
     _ensure_user_identity_schema()
     _ensure_business_id_schema()
     _ensure_prompt_history_columns()
@@ -437,6 +439,94 @@ def _ensure_user_whitelist_column():
 
     with engine.begin() as conn:
         conn.execute(text("ALTER TABLE users ADD COLUMN is_whitelisted BOOLEAN DEFAULT 0"))
+
+
+def _ensure_user_referral_schema():
+    inspector = inspect(engine)
+    if "users" not in inspector.get_table_names():
+        return
+
+    user_columns = {col["name"] for col in inspector.get_columns("users")}
+    with engine.begin() as conn:
+        if "referrer_id" not in user_columns:
+            conn.execute(text("ALTER TABLE users ADD COLUMN referrer_id INTEGER NULL"))
+            conn.execute(text("CREATE INDEX ix_users_referrer_id ON users (referrer_id)"))
+            conn.execute(
+                text(
+                    """
+                    ALTER TABLE users
+                    ADD CONSTRAINT fk_users_referrer_id
+                    FOREIGN KEY (referrer_id) REFERENCES users (id)
+                    """
+                )
+            )
+        if "used_promo_code_id" not in user_columns:
+            conn.execute(text("ALTER TABLE users ADD COLUMN used_promo_code_id INTEGER NULL"))
+            conn.execute(text("CREATE INDEX ix_users_used_promo_code_id ON users (used_promo_code_id)"))
+
+
+def _ensure_user_promo_code_schema():
+    inspector = inspect(engine)
+    table_names = set(inspector.get_table_names())
+    if "users" not in table_names:
+        return
+
+    if "user_promo_codes" not in table_names:
+        with engine.begin() as conn:
+            conn.execute(
+                text(
+                    """
+                    CREATE TABLE user_promo_codes (
+                        id INTEGER NOT NULL AUTO_INCREMENT,
+                        user_id INTEGER NOT NULL,
+                        code VARCHAR(32) NOT NULL,
+                        platform_name VARCHAR(50) NOT NULL DEFAULT '',
+                        status VARCHAR(20) NOT NULL DEFAULT 'enabled',
+                        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                        PRIMARY KEY (id),
+                        UNIQUE KEY uq_user_promo_codes_code (code),
+                        INDEX ix_user_promo_codes_user_id (user_id),
+                        INDEX ix_user_promo_codes_code (code),
+                        INDEX ix_user_promo_codes_status (status),
+                        CONSTRAINT fk_user_promo_codes_user_id FOREIGN KEY (user_id) REFERENCES users (id)
+                    )
+                    """
+                )
+            )
+        inspector = inspect(engine)
+
+    promo_columns = {col["name"] for col in inspector.get_columns("user_promo_codes")}
+    with engine.begin() as conn:
+        if "platform_name" not in promo_columns:
+            conn.execute(
+                text(
+                    """
+                    ALTER TABLE user_promo_codes
+                    ADD COLUMN platform_name VARCHAR(50) NOT NULL DEFAULT ''
+                    AFTER code
+                    """
+                )
+            )
+        if "status" not in promo_columns:
+            conn.execute(
+                text(
+                    """
+                    ALTER TABLE user_promo_codes
+                    ADD COLUMN status VARCHAR(20) NOT NULL DEFAULT 'enabled'
+                    AFTER platform_name
+                    """
+                )
+            )
+        conn.execute(
+            text(
+                """
+                UPDATE user_promo_codes
+                SET status = 'enabled'
+                WHERE status IS NULL OR status = ''
+                """
+            )
+        )
 
 
 def _ensure_user_credit_schema():

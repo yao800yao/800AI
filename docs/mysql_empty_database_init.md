@@ -27,7 +27,18 @@
 - `role`: 角色，常见值为 `user`、`admin`、`superadmin`。
 - `status`: 账号状态，常见值为 `active`、`disabled`。
 - `is_whitelisted`: 是否白名单用户。
+- `referrer_id`: 推荐人内部用户 ID；当新用户使用推广码注册时写入。
+- `used_promo_code_id`: 注册时使用的推广码记录 ID；可用于追踪具体渠道来源。
 - `created_at` / `updated_at`: 用户创建时间、最后更新时间。
+
+### `user_promo_codes`
+
+- `id`: 推广码主键。
+- `user_id`: 推广码归属白名单用户。
+- `code`: 推广码字符串，唯一。
+- `platform_name`: 推广渠道/平台名称，用于区分来源。
+- `status`: 推广码状态，当前常见值为 `enabled`、`disabled`。
+- `created_at` / `updated_at`: 创建时间、最后更新时间。
 
 ### `user_credits`
 
@@ -429,10 +440,31 @@ CREATE TABLE users (
   `role` VARCHAR(20) DEFAULT 'user',
   status VARCHAR(10) DEFAULT 'active',
   is_whitelisted TINYINT(1) NOT NULL DEFAULT 0,
+  referrer_id INT DEFAULT NULL,
+  used_promo_code_id INT DEFAULT NULL,
   created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
   updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (id),
-  UNIQUE KEY uq_users_business_id (business_id)
+  UNIQUE KEY uq_users_business_id (business_id),
+  KEY ix_users_referrer_id (referrer_id),
+  KEY ix_users_used_promo_code_id (used_promo_code_id),
+  CONSTRAINT fk_users_referrer_id FOREIGN KEY (referrer_id) REFERENCES users (id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE user_promo_codes (
+  id INT NOT NULL AUTO_INCREMENT,
+  user_id INT NOT NULL,
+  code VARCHAR(32) NOT NULL,
+  platform_name VARCHAR(50) NOT NULL DEFAULT '',
+  status VARCHAR(20) NOT NULL DEFAULT 'enabled',
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (id),
+  UNIQUE KEY uq_user_promo_codes_code (code),
+  KEY ix_user_promo_codes_user_id (user_id),
+  KEY ix_user_promo_codes_code (code),
+  KEY ix_user_promo_codes_status (status),
+  CONSTRAINT fk_user_promo_codes_user_id FOREIGN KEY (user_id) REFERENCES users (id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE user_credits (

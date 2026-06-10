@@ -10,6 +10,7 @@ from app.models.credit_redeem_key import CreditRedeemKey
 from app.models.payment_order import PaymentOrder
 from app.models.user_credit import UserCredit
 from app.models.user_api_key import UserApiKey
+from app.models.user_promo_code import UserPromoCode
 from app.models.prompt_history import PromptHistory
 from app.models.history_pin import HistoryPin
 from app.models.feedback import Feedback
@@ -31,6 +32,7 @@ __all__ = [
     "PaymentOrder",
     "UserCredit",
     "UserApiKey",
+    "UserPromoCode",
     "PromptHistory",
     "HistoryPin",
     "Feedback",

@@ -32,6 +32,7 @@ import type {
   HistoryFilter,
   HistoryResponse,
   UserHistoryCard,
+  AdminUserPromoDashboard,
 } from "@/types";
 
 function buildAnalyticsParams(query: AdminAnalyticsQuery): Record<string, unknown> {
@@ -78,6 +79,10 @@ export function allocateCredits(userId: string, amount: number, description?: st
 
 export function resetUserCredits(userId: string, description?: string): Promise<AdminUser> {
   return client.post(`/admin/users/${userId}/credits/reset`, { description: description || "" });
+}
+
+export function getUserPromoDashboard(userId: string): Promise<AdminUserPromoDashboard> {
+  return client.get(`/admin/users/${userId}/promo-dashboard`);
 }
 
 export function getCreditLogs(

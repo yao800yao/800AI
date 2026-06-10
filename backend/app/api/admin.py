@@ -11,6 +11,7 @@ from app.schemas.admin import (
     UpdateWhitelistRequest, ResetPasswordRequest, StatsOut, AllocateCreditsRequest, ResetCreditsRequest, CreditLogOut,
     CreateRedeemKeysBatchRequest, RedeemKeyBatchOut, RedeemKeyOut, UpdateRedeemKeyStatusRequest, PaymentOrderAdminOut,
     AnalyticsSummaryOut, AnalyticsTimeseriesOut, AnalyticsBreakdownOut, AnalyticsRedeemRevenueOut, ErrorAnalyticsOut, DailyReportTestOut,
+    AdminUserPromoDashboardOut,
 )
 from app.schemas.feedback import (
     FeedbackDetail,
@@ -28,6 +29,7 @@ from app.services.admin_service import (
     get_analytics_payment_revenue, get_error_analytics,
 )
 from app.services.credit_redeem_service import create_redeem_key_batch, list_redeem_keys, update_redeem_key_status
+from app.services.promo_service import get_user_promo_dashboard_for_admin
 from app.services.feedback_service import (
     count_unresolved_feedbacks,
     get_feedback_detail,
@@ -124,6 +126,18 @@ def admin_reset_credits(
     db: Session = Depends(get_db),
 ):
     return reset_user_credits(db, user_id, body.description, admin.id)
+
+
+@router.get("/users/{user_id}/promo-dashboard", response_model=AdminUserPromoDashboardOut)
+def admin_user_promo_dashboard(
+    user_id: str,
+    _user: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    target_user = get_user_by_business_id(db, user_id)
+    if not target_user:
+        raise HTTPException(status_code=404, detail="用户不存在")
+    return get_user_promo_dashboard_for_admin(db, target_user)
 
 
 @router.post("/redeem-keys/batch", response_model=RedeemKeyBatchOut)

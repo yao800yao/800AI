@@ -11,9 +11,10 @@ import {
   resetUserPassword,
   allocateCredits,
   resetUserCredits,
+  getUserPromoDashboard,
 } from "@/api/admin";
 import { useAuthStore } from "@/stores/auth";
-import type { AdminUser } from "@/types";
+import type { AdminUser, AdminUserPromoDashboard } from "@/types";
 
 const auth = useAuthStore();
 const isSuperAdmin = computed(() => auth.isSuperAdmin);
@@ -41,6 +42,9 @@ const creditsForm = reactive({ amount: 0, description: "" });
 const whitelistOpen = ref(false);
 const whitelistKeyword = ref("");
 const whitelistLoadingId = ref<string | null>(null);
+const promoDashboardOpen = ref(false);
+const promoDashboardLoading = ref(false);
+const promoDashboard = ref<AdminUserPromoDashboard | null>(null);
 const currentPage = ref(1);
 const pageSize = 30;
 
@@ -251,6 +255,20 @@ async function handleToggleWhitelist(user: AdminUser) {
   }
 }
 
+async function openPromoDashboard(user: AdminUser) {
+  promoDashboardOpen.value = true;
+  promoDashboardLoading.value = true;
+  promoDashboard.value = null;
+  try {
+    promoDashboard.value = await getUserPromoDashboard(user.id);
+  } catch (err: any) {
+    message.error(err.response?.data?.detail || "获取推广数据失败");
+    promoDashboardOpen.value = false;
+  } finally {
+    promoDashboardLoading.value = false;
+  }
+}
+
 function isFirstAdmin(u: AdminUser) {
   const admins = users.value.filter((x) => x.role === "admin");
   if (!admins.length) return false;
@@ -398,6 +416,15 @@ function fmtTime(t: string) { return t ? new Date(t).toLocaleString("zh-CN") : "
               <a-button type="link" size="small" class="user-action-btn user-action-btn-primary" @click="openCredits(record)">
                 <template #icon><WalletOutlined /></template>
                 分配积分
+              </a-button>
+              <a-button
+                v-if="record.is_whitelisted"
+                type="link"
+                size="small"
+                class="user-action-btn user-action-btn-secondary"
+                @click="openPromoDashboard(record)"
+              >
+                推广数据
               </a-button>
               <a-button
                 type="link"
@@ -578,6 +605,76 @@ function fmtTime(t: string) { return t ? new Date(t).toLocaleString("zh-CN") : "
         </div>
       </div>
     </a-modal>
+
+    <a-modal
+      v-model:open="promoDashboardOpen"
+      :title="`推广数据 - ${promoDashboard?.username || ''}`"
+      :footer="null"
+      centered
+      :width="960"
+    >
+      <a-spin :spinning="promoDashboardLoading">
+        <div v-if="promoDashboard" class="promo-dashboard">
+          <div class="promo-dashboard-stats">
+            <div class="promo-stat-card">
+              <span>推广注册人数</span>
+              <strong>{{ promoDashboard.summary.total_referrals }}</strong>
+            </div>
+            <div class="promo-stat-card">
+              <span>已使用推广码数</span>
+              <strong>{{ promoDashboard.summary.used_code_count }}</strong>
+            </div>
+            <div class="promo-stat-card">
+              <span>奖励发放人数</span>
+              <strong>{{ promoDashboard.summary.rewarded_registrations }}</strong>
+            </div>
+          </div>
+
+          <div class="promo-dashboard-section">
+            <div class="promo-dashboard-title">推广码列表</div>
+            <a-table
+              :data-source="promoDashboard.promo_codes"
+              :pagination="false"
+              row-key="id"
+              size="small"
+              :scroll="{ x: 700 }"
+            >
+              <a-table-column title="推广码" data-index="code" width="160" />
+              <a-table-column title="平台" data-index="platform_name" width="180" />
+              <a-table-column title="使用人数" data-index="referral_count" width="100" />
+              <a-table-column title="状态" data-index="status" width="100" />
+              <a-table-column title="创建时间" data-index="created_at" width="180">
+                <template #default="{ record }">
+                  {{ fmtTime(record.created_at) }}
+                </template>
+              </a-table-column>
+            </a-table>
+          </div>
+
+          <div class="promo-dashboard-section">
+            <div class="promo-dashboard-title">推广用户列表</div>
+            <a-table
+              :data-source="promoDashboard.referrals"
+              :pagination="false"
+              row-key="user_id"
+              size="small"
+              :scroll="{ x: 860 }"
+            >
+              <a-table-column title="用户" data-index="username" width="140" />
+              <a-table-column title="邮箱" data-index="email_masked" width="220" />
+              <a-table-column title="推广码" data-index="promo_code" width="140" />
+              <a-table-column title="来源平台" data-index="platform_name" width="160" />
+              <a-table-column title="奖励积分" data-index="reward_credits" width="100" />
+              <a-table-column title="注册时间" data-index="registered_at" width="180">
+                <template #default="{ record }">
+                  {{ fmtTime(record.registered_at) }}
+                </template>
+              </a-table-column>
+            </a-table>
+          </div>
+        </div>
+      </a-spin>
+    </a-modal>
   </div>
 </template>
 
@@ -737,6 +834,48 @@ function fmtTime(t: string) { return t ? new Date(t).toLocaleString("zh-CN") : "
   color: #c7770d;
   background: #fff4df;
   border-color: #efc784;
+}
+
+.promo-dashboard {
+  display: grid;
+  gap: 18px;
+}
+
+.promo-dashboard-stats {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.promo-stat-card {
+  padding: 16px;
+  border-radius: 16px;
+  background: #fff8ee;
+  border: 1px solid #f2d7a6;
+  display: grid;
+  gap: 8px;
+
+  span {
+    color: #8c7458;
+    font-size: 13px;
+  }
+
+  strong {
+    color: #4c341a;
+    font-size: 28px;
+    line-height: 1;
+  }
+}
+
+.promo-dashboard-section {
+  display: grid;
+  gap: 12px;
+}
+
+.promo-dashboard-title {
+  color: #4c341a;
+  font-size: 16px;
+  font-weight: 700;
 }
 
 .warm-tag-role-user {

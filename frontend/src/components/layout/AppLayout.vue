@@ -11,6 +11,7 @@ import {
   getContactConfig,
   getAnnouncementConfig,
   redeemCreditKey,
+  validatePromoCode,
 } from "@/api/auth";
 import { createPaymentOrder, listPaymentPlans } from "@/api/payments";
 import { createFeedback, getMyCompletedUnreadFeedbackCount } from "@/api/feedback";
@@ -67,6 +68,7 @@ const isSuperAdmin = computed(() => auth.isSuperAdmin);
 const hideTopMenu = computed(() => route.meta.hideTopMenu === true);
 const mobileDrawerOpen = ref(false);
 const routeTransitionName = ref("route-page-forward");
+const canManagePromoCodes = computed(() => auth.user?.is_whitelisted === true);
 
 const routeOrder = new Map<string, number>([
   ["/", 0],
@@ -79,22 +81,23 @@ const routeOrder = new Map<string, number>([
   ["/system-messages/:messageId", 7],
   ["/settings", 8],
   ["/credit-logs", 9],
-  ["/feedbacks", 10],
-  ["/feedbacks/:feedbackId", 11],
-  ["/admin/templates", 12],
-  ["/admin/users", 13],
-  ["/admin/user-tasks", 14],
-  ["/admin/dashboard", 15],
-  ["/admin/error-analytics", 16],
-  ["/admin/general-settings", 17],
-  ["/admin/redeem-keys", 18],
-  ["/admin/revenue", 19],
-  ["/admin/payment-orders", 20],
-  ["/admin/feedbacks", 21],
-  ["/admin/feedbacks/:feedbackId", 22],
-  ["/admin/system-messages", 23],
-  ["/admin/cos-config", 24],
-  ["/admin/external-api-configs", 25],
+  ["/promo-codes", 10],
+  ["/feedbacks", 11],
+  ["/feedbacks/:feedbackId", 12],
+  ["/admin/templates", 13],
+  ["/admin/users", 14],
+  ["/admin/user-tasks", 15],
+  ["/admin/dashboard", 16],
+  ["/admin/error-analytics", 17],
+  ["/admin/general-settings", 18],
+  ["/admin/redeem-keys", 19],
+  ["/admin/revenue", 20],
+  ["/admin/payment-orders", 21],
+  ["/admin/feedbacks", 22],
+  ["/admin/feedbacks/:feedbackId", 23],
+  ["/admin/system-messages", 24],
+  ["/admin/cos-config", 25],
+  ["/admin/external-api-configs", 26],
 ]);
 
 const currentTheme = ref<AppThemeName>(getCurrentTheme());
@@ -166,18 +169,23 @@ const hasUserUnreadFeedback = computed(() => userCompletedUnreadFeedbackCount.va
 const hasUserUnreadSystemMessage = computed(() => userUnreadSystemMessageCount.value > 0);
 const hasUserUnreadNotice = computed(() => hasUserUnreadFeedback.value || hasUserUnreadSystemMessage.value);
 
-const userMenuItems = [
+const userMenuItems = computed(() => [
   { key: "profile", label: "个人主页", icon: UserOutlined, danger: false },
   { key: "credits", label: "积分明细", icon: ThunderboltOutlined, danger: false },
+  ...(canManagePromoCodes.value ? [{ key: "promo-codes", label: "我的推广码", icon: GiftOutlined, danger: false }] : []),
   { key: "api-keys", label: "API 调用", icon: KeyOutlined, danger: false },
   { key: "settings", label: "设置", icon: SettingOutlined, danger: false },
   { key: "my-feedback", label: "我的反馈", icon: MessageOutlined, danger: false },
   { key: "system-messages", label: "系统消息", icon: MailOutlined, danger: false },
   { key: "logout", label: "退出登录", icon: LogoutOutlined, danger: true },
-];
-const userMenuAccountItems = userMenuItems.filter((item) => ["profile", "credits", "api-keys", "settings"].includes(item.key));
-const userMenuNoticeItems = userMenuItems.filter((item) => ["my-feedback", "system-messages"].includes(item.key));
-const userMenuDangerItems = userMenuItems.filter((item) => item.danger);
+]);
+const userMenuAccountItems = computed(() =>
+  userMenuItems.value.filter((item) => ["profile", "credits", "promo-codes", "api-keys", "settings"].includes(item.key))
+);
+const userMenuNoticeItems = computed(() =>
+  userMenuItems.value.filter((item) => ["my-feedback", "system-messages"].includes(item.key))
+);
+const userMenuDangerItems = computed(() => userMenuItems.value.filter((item) => item.danger));
 
 const creditPurchasePlans = ref<PaymentPlan[]>([]);
 
@@ -194,7 +202,15 @@ const selectedKeys = computed(() => {
   if (p === "/") return [];
   if (p === "/templates") return ["templates"];
   if (p === "/history") return ["history"];
-  if (p === "/profile" || p === "/settings" || p === "/credit-logs" || p === "/api-keys" || p.startsWith("/feedbacks") || p.startsWith("/system-messages")) return [];
+  if (
+    p === "/profile" ||
+    p === "/settings" ||
+    p === "/credit-logs" ||
+    p === "/promo-codes" ||
+    p === "/api-keys" ||
+    p.startsWith("/feedbacks") ||
+    p.startsWith("/system-messages")
+  ) return [];
   return ["generate"];
 });
 
@@ -248,6 +264,7 @@ function handleUserMenu({ key }: { key: string }) {
   else if (key === "my-feedback") router.push("/feedbacks");
   else if (key === "settings") router.push("/settings");
   else if (key === "credits") router.push("/credit-logs");
+  else if (key === "promo-codes") router.push("/promo-codes");
   else if (key === "api-keys") router.push("/api-keys");
   else if (key === "logout") {
     resetUserUnreadSystemMessageNotificationState();
@@ -375,6 +392,7 @@ const registerForm = reactive({
   username: "",
   password: "",
   confirmPassword: "",
+  promoCode: "",
   agreedTerms: false,
 });
 const registerLoading = ref(false);
@@ -445,6 +463,7 @@ function resetAuthForms() {
   registerForm.username = "";
   registerForm.password = "";
   registerForm.confirmPassword = "";
+  registerForm.promoCode = "";
   registerForm.agreedTerms = false;
 }
 
@@ -585,6 +604,14 @@ async function handleRegisterSubmit() {
     message.warning("两次密码不一致");
     return;
   }
+  if (registerForm.promoCode.trim()) {
+    try {
+      await validatePromoCode(registerForm.promoCode.trim());
+    } catch (err: any) {
+      message.error(err.response?.data?.detail || err.message || "推广码无效");
+      return;
+    }
+  }
   if (!registerForm.agreedTerms) {
     message.warning("请先阅读并同意用户协议和隐私政策");
     return;
@@ -599,13 +626,16 @@ async function handleRegisterSubmit() {
     const res = await apiRegister(
       registerForm.username.trim(),
       registerForm.email.trim(),
-      registerForm.password
+      registerForm.password,
+      registerForm.promoCode.trim() || undefined,
     );
     auth.setAuth(res.token, res.user);
     message.success("注册成功");
     notification.success({
       message: "赠送积分已到账",
-      description: "新用户注册赠送的 30 个试用积分已到账。",
+      description: registerForm.promoCode.trim()
+        ? "新用户注册赠送的 10 个试用积分和推广码额外奖励的 20 个积分已到账。"
+        : "新用户注册赠送的 10 个试用积分已到账。",
       placement: "topRight",
       duration: 6,
     });
@@ -1585,6 +1615,14 @@ watch(purchaseDialogOpen, (open) => {
                 placeholder="请再次输入密码"
                 :prefix="h(LockOutlined, { style: authInputPrefixStyle })"
                 @press-enter="handleRegisterSubmit"
+              />
+            </a-form-item>
+            <a-form-item label="推广码（选填）">
+              <a-input
+                v-model:value="registerForm.promoCode"
+                size="large"
+                placeholder="填写推广码，可额外获得 20 积分"
+                :maxlength="32"
               />
             </a-form-item>
             <a-form-item class="auth-agreement-item">

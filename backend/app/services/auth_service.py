@@ -6,13 +6,14 @@ from sqlalchemy.orm import Session
 
 from app.config import settings
 from app.models.user import User
+from app.services.promo_service import PROMO_CODE_REWARD_CREDITS, get_valid_promo_code
 from app.services.business_id_service import user_external_id
 from app.services.user_credit_service import change_user_credit_balance
 from app.utils.security import create_access_token, hash_password, verify_password
 
 EMAIL_REGEX = re.compile(r"^[^\s@]+@[^\s@]+\.[^\s@]+$")
 CLOUDBASE_AUTH_PATH = "/auth"
-NEW_USER_TRIAL_CREDITS = 30
+NEW_USER_TRIAL_CREDITS = 10
 
 
 def _normalize_email(email: str) -> str:
@@ -35,7 +36,13 @@ def _validate_username(username: str) -> str:
     return normalized
 
 
-def register_user(db: Session, username: str, email: str, password: str) -> tuple[str, User]:
+def register_user(
+    db: Session,
+    username: str,
+    email: str,
+    password: str,
+    promo_code: str | None = None,
+) -> tuple[str, User]:
     normalized_username = _validate_username(username)
     normalized_email = _validate_email(email)
     if len(password) < 6:
@@ -45,6 +52,8 @@ def register_user(db: Session, username: str, email: str, password: str) -> tupl
     if existing:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="邮箱已注册")
 
+    promo = get_valid_promo_code(db, promo_code) if promo_code else None
+
     user = User(
         username=normalized_username,
         email=normalized_email,
@@ -52,6 +61,8 @@ def register_user(db: Session, username: str, email: str, password: str) -> tupl
         password_hash=hash_password(password),
         role="user",
         status="active",
+        referrer_id=promo.user_id if promo else None,
+        used_promo_code_id=promo.id if promo else None,
     )
     db.add(user)
     db.flush()
@@ -62,6 +73,14 @@ def register_user(db: Session, username: str, email: str, password: str) -> tupl
         log_type="allocate",
         description="新用户注册试用积分",
     )
+    if promo:
+        change_user_credit_balance(
+            db,
+            user.id,
+            delta=PROMO_CODE_REWARD_CREDITS,
+            log_type="allocate",
+            description=f"使用推广码 {promo.code} 注册奖励积分",
+        )
     db.commit()
     db.refresh(user)
     token = create_access_token(user_external_id(user), user.role)

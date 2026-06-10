@@ -20,6 +20,12 @@ from app.schemas.auth import (
     UpdateProfileRequest,
     RedeemCreditKeyRequest,
     RedeemCreditKeyResponse,
+    CreatePromoCodeRequest,
+    UpdatePromoCodeRequest,
+    PromoCodeListResponse,
+    PromoReferralListResponse,
+    PromoReferralActivityListResponse,
+    PromoCodeValidationResponse,
 )
 from app.services.business_id_service import get_user_by_business_id, user_external_id
 from app.services.auth_service import (
@@ -28,6 +34,14 @@ from app.services.auth_service import (
     register_user,
     reset_password_with_email_code,
     update_username,
+)
+from app.services.promo_service import (
+    create_promo_code,
+    get_my_promo_codes,
+    get_my_promo_referrals,
+    get_my_promo_referral_activities,
+    get_valid_promo_code,
+    update_promo_code_platform,
 )
 from app.services.credit_redeem_service import redeem_credit_key
 from app.models.prompt_history import PromptHistory
@@ -43,13 +57,13 @@ AVATAR_MAX_SIZE = 1 * 1024 * 1024  # 1 MB
 def _user_brief(db: Session, user: User) -> UserBrief:
     return UserBrief(
         id=user_external_id(user), business_id=user.business_id, username=user.username, email=user.email, role=user.role,
-        avatar_url=user.avatar_url or "", credits=get_user_credit_balance(db, user.id),
+        avatar_url=user.avatar_url or "", credits=get_user_credit_balance(db, user.id), is_whitelisted=bool(user.is_whitelisted),
     )
 
 
 @router.post("/register", response_model=LoginResponse)
 def register(body: RegisterRequest, request: Request, db: Session = Depends(get_db)):
-    token, user = register_user(db, body.username, body.email, body.password)
+    token, user = register_user(db, body.username, body.email, body.password, body.promo_code)
     request.state.user_id = user_external_id(user)
     audit_logger.info(
         "user registered",
@@ -173,6 +187,82 @@ def update_profile(
         },
     )
     return _user_brief(db, user)
+
+
+@router.get("/promo-codes/me", response_model=PromoCodeListResponse)
+def list_my_promo_codes(
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    return get_my_promo_codes(db, user)
+
+
+@router.post("/promo-codes", response_model=PromoCodeListResponse)
+def create_my_promo_code(
+    body: CreatePromoCodeRequest,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    create_promo_code(db, user, body.platform_name)
+    return get_my_promo_codes(db, user)
+
+
+@router.patch("/promo-codes/{promo_code_id}", response_model=PromoCodeListResponse)
+def update_my_promo_code(
+    promo_code_id: int,
+    body: UpdatePromoCodeRequest,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    update_promo_code_platform(db, user, promo_code_id, body.platform_name)
+    return get_my_promo_codes(db, user)
+
+
+@router.get("/promo-referrals", response_model=PromoReferralListResponse)
+def list_my_promo_referrals(
+    keyword: Optional[str] = Query(None),
+    platform_name: Optional[str] = Query(None),
+    start_date: Optional[datetime] = Query(None),
+    end_date: Optional[datetime] = Query(None),
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    return get_my_promo_referrals(
+        db,
+        user,
+        keyword=keyword,
+        platform_name=platform_name,
+        start_date=start_date,
+        end_date=end_date,
+    )
+
+
+@router.get("/promo-referral-activities", response_model=PromoReferralActivityListResponse)
+def list_my_promo_referral_activities(
+    keyword: Optional[str] = Query(None),
+    platform_name: Optional[str] = Query(None),
+    start_date: Optional[datetime] = Query(None),
+    end_date: Optional[datetime] = Query(None),
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    return get_my_promo_referral_activities(
+        db,
+        user,
+        keyword=keyword,
+        platform_name=platform_name,
+        start_date=start_date,
+        end_date=end_date,
+    )
+
+
+@router.get("/promo-codes/validate", response_model=PromoCodeValidationResponse)
+def validate_promo_code(
+    code: str = Query(..., min_length=1),
+    db: Session = Depends(get_db),
+):
+    promo = get_valid_promo_code(db, code)
+    return PromoCodeValidationResponse(valid=True, code=promo.code, platform_name=promo.platform_name)
 
 
 @router.get("/credit-logs")

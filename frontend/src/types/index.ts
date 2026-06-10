@@ -6,6 +6,7 @@ export interface UserInfo {
   role: "user" | "admin" | "superadmin";
   avatar_url?: string;
   credits: number;
+  is_whitelisted: boolean;
 }
 
 export interface LoginResponse {
@@ -309,6 +310,14 @@ export interface AdminUser {
   created_at: string;
 }
 
+export interface AdminUserPromoDashboard {
+  user_id: string;
+  username: string;
+  summary: PromoCodeSummary;
+  promo_codes: PromoCodeItem[];
+  referrals: PromoReferralItem[];
+}
+
 export interface CreditLog {
   id: number;
   user_id: string;
@@ -363,6 +372,60 @@ export interface RedeemCreditResult {
   credits: number;
   redeem_key: string;
   used_at?: string | null;
+}
+
+export interface PromoCodeSummary {
+  total_referrals: number;
+  used_code_count: number;
+  rewarded_registrations: number;
+}
+
+export interface PromoCodeItem {
+  id: number;
+  code: string;
+  platform_name: string;
+  status: string;
+  created_at?: string | null;
+  referral_count: number;
+}
+
+export interface PromoCodeListResponse {
+  summary: PromoCodeSummary;
+  items: PromoCodeItem[];
+}
+
+export interface PromoReferralItem {
+  user_id: string;
+  username: string;
+  email_masked: string;
+  email?: string | null;
+  promo_code: string;
+  platform_name: string;
+  reward_credits: number;
+  registered_at?: string | null;
+}
+
+export interface PromoReferralListResponse {
+  total: number;
+  items: PromoReferralItem[];
+}
+
+export interface PromoReferralActivityItem {
+  user_id: string;
+  username: string;
+  email_masked: string;
+  activity_type: "purchase" | "redeem";
+  credits: number;
+  amount_fen?: number | null;
+  amount_yuan?: number | null;
+  redeem_key: string;
+  order_no: string;
+  occurred_at?: string | null;
+}
+
+export interface PromoReferralActivityListResponse {
+  total: number;
+  items: PromoReferralActivityItem[];
 }
 
 export interface AdminRedeemKey {

@@ -220,3 +220,36 @@ class DailyReportTestOut(BaseModel):
     task_success_count: int
     task_failed_count: int
     credit_consumed: int
+
+
+class AdminPromoCodeItemOut(BaseModel):
+    id: int
+    code: str
+    platform_name: str
+    status: str
+    created_at: datetime | None = None
+    referral_count: int = 0
+
+
+class AdminPromoReferralItemOut(BaseModel):
+    user_id: str
+    username: str
+    email_masked: str = "-"
+    promo_code: str = ""
+    platform_name: str = ""
+    reward_credits: int = 0
+    registered_at: datetime | None = None
+
+
+class AdminPromoSummaryOut(BaseModel):
+    total_referrals: int = 0
+    used_code_count: int = 0
+    rewarded_registrations: int = 0
+
+
+class AdminUserPromoDashboardOut(BaseModel):
+    user_id: str
+    username: str
+    summary: AdminPromoSummaryOut
+    promo_codes: list[AdminPromoCodeItemOut]
+    referrals: list[AdminPromoReferralItemOut]

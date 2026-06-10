@@ -41,6 +41,12 @@ const router = createRouter({
           component: () => import("@/views/CreditLogsView.vue"),
         },
         {
+          path: "promo-codes",
+          name: "PromoCodes",
+          meta: { requiresAuth: true },
+          component: () => import("@/views/PromoCodesView.vue"),
+        },
+        {
           path: "payment-result",
           name: "PaymentResult",
           meta: { requiresAuth: true },

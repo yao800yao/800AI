@@ -1,4 +1,5 @@
-from sqlalchemy import Boolean, Column, Integer, String, DateTime, func
+from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Integer, String, func
+from sqlalchemy.orm import relationship
 from app.database import Base
 from app.utils.business_id import generate_business_id
 
@@ -16,5 +17,9 @@ class User(Base):
     role = Column(String(20), default="user")
     status = Column(String(10), default="active")
     is_whitelisted = Column(Boolean, default=False, nullable=False, server_default="0")
+    referrer_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
+    used_promo_code_id = Column(Integer, nullable=True, index=True)
     created_at = Column(DateTime, server_default=func.now())
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
+
+    referrer = relationship("User", remote_side=[id], foreign_keys=[referrer_id], backref="referred_users")
