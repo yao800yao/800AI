@@ -1,39 +1,48 @@
-# 🍌 80AI
+# 🍌 800AI
 
-80AI 是一个面向 Web 管理端、普通用户端、移动端和 API Key 场景的 AI 绘图系统。当前仓库已经覆盖用户注册登录、模板创作、多模式生图、积分体系、兑换码、支付宝在线购买、反馈与系统消息、管理后台、腾讯云 COS 存储，以及独立的对外 API 服务目录。
+800AI 是一个面向 Web 用户端、管理后台和 API Key 场景的 AI 绘图系统。当前仓库覆盖用户注册登录、模板创作、多模式生图、批量生图、积分体系、兑换码、支付宝在线购买、反馈与系统消息、管理后台、腾讯云 COS 存储，以及独立的对外 API 服务。
+
+- 官网：<https://800ai.vip>
+- API 文档：<https://800ai.vip/docs-api/>
 
 ## 功能总览
 
 ### 用户端
 
+- 首页：展示平台核心价值与模板效果案例
 - 模板中心：浏览模板、套用模板参数、快速进入创作流程
 - AI 生图：支持文生图、图编辑、局部重绘、提示词反推
 - 批量生图：支持批量卡片配置、全局参数一键应用、按空闲槽位自动排队提交、结果批量下载
 - 历史记录：查看任务、预览结果、下载图片、重新生成、删除、置顶
 - 账号体系：注册、登录、修改密码、忘记密码、个人资料、头像上传
 - 积分体系：余额查询、积分流水、按场景扣费
-- 积分获取：兑换码兑换、支付宝积分套餐购买
+- 积分获取：兑换码兑换；支付宝积分套餐购买（积分不足时可触发购买流程，顶部菜单默认仅展示兑换入口）
 - 消息与反馈：提交反馈、查看处理结果、查看系统消息
 - API Key：用户可创建和管理自己的 API Key，用于程序化调用
+- 推广码：用户可查看与管理个人推广码
+- 法律文档：用户协议、隐私政策
 
 ### 管理端
 
+- 数据看板：核心指标、趋势图、维度拆分
 - 用户管理：创建用户、启停用户、角色调整、白名单、重置密码、手动充扣积分
 - 模板管理：模板及标签维护
 - 兑换码管理：批量生成、筛选、启用/禁用
-- 数据分析：统计看板、时序分析、维度拆分、兑换码营收
+- 营收分析：兑换码营收、支付订单统计
+- 支付订单：查看在线购买积分订单，支持筛选与状态追踪
 - 全站任务管理：查看用户任务历史与详情
+- 错误分析：生图失败统计与错误分布分析
 - 反馈处理：查看未处理反馈、更新处理状态
 - 系统消息：站内信群发与未读追踪
 - 配置管理：公告、联系二维码、COS 配置、外部生图接口配置
+- API Key 管理：查看与管理用户 API Key
 
 ### 其他能力
 
 - 腾讯云 COS：前端临时凭证直传，后端结果图上传，兼容历史 `/uploads/...`
 - 异步执行：Celery + Redis；开发环境可按配置降级为后台线程
 - 支付：已实现支付宝 PC Web 积分购买闭环
-- 对外 API：仓库内包含独立 `backend-api/` 服务目录，支持 API Key 场景
-- Flutter 客户端：仓库内包含 `flutter_app/`，已实现模板、生图、历史、个人中心等基础能力
+- 对外 API：仓库内包含独立 `backend-api/` 服务目录，支持 API Key 场景；开发者文档托管于 `https://800ai.vip/docs-api/`
 
 ## 技术栈
 
@@ -42,20 +51,16 @@
 - 异步任务：Celery + Redis
 - 存储：腾讯云 COS + STS 临时凭证
 - 鉴权与账号辅助能力：JWT + CloudBase 邮箱验证流程
-- 移动端：Flutter
 
 ## 仓库结构
 
 ```text
-80AI/
-├── frontend/                 # Web 前端
+800AI/
+├── frontend/                 # Web 前端（用户端 + 管理端）
 ├── backend/                  # 主后端，承载用户端/管理端业务
 ├── backend-api/              # 面向 API Key 场景的独立后端服务
-├── flutter_app/              # Flutter 客户端
 ├── docs/                     # 运维、接入、用户文档
-├── docs-api/                 # 对外 API 文档站点源码与静态站内容
-├── prd.md                    # Web 产品需求说明
-└── prd-app.md                # Flutter 端需求说明
+└── prd.md                    # Web 产品需求说明
 ```
 
 ## 角色与权限
@@ -154,7 +159,7 @@ CELERY_WORKER_CONCURRENCY=4 celery -A app.workers.celery_app worker --loglevel=i
 ### 1. 生图与积分
 
 - 任务模式覆盖文生图、图编辑、局部重绘、提示词反推
-- Web 端新增 `批量生图` 页面，支持最多 8 张任务卡片连续生成，默认初始化 3 张卡片
+- Web 端提供 `批量生图` 页面，支持最多 8 张任务卡片连续生成，默认初始化 3 张卡片
 - 支持全局模型、尺寸比例、分辨率、自定义尺寸、提示词与参考图一键应用到全部任务卡
 - 批量模式下会按当前空闲并发槽位自动提交队列，并轮询任务状态；已完成结果支持预览、下载、删除、继续编辑与反馈
 - 图编辑批量模式支持参考图拖拽上传，草稿会保存到浏览器本地，刷新后可恢复上次配置
@@ -187,8 +192,8 @@ ALIPAY_APP_ID=
 ALIPAY_PRIVATE_KEY=
 ALIPAY_PUBLIC_KEY=
 ALIPAY_GATEWAY=https://openapi.alipay.com/gateway.do
-ALIPAY_NOTIFY_URL=https://api.example.com/api/payment/webhook/alipay
-ALIPAY_RETURN_URL=https://web.example.com/payment-result
+ALIPAY_NOTIFY_URL=https://api.800ai.vip/api/payment/webhook/alipay
+ALIPAY_RETURN_URL=https://800ai.vip/payment-result
 ALIPAY_SIGN_TYPE=RSA2
 ALIPAY_TIMEOUT_EXPRESS=15m
 ```
@@ -196,7 +201,7 @@ ALIPAY_TIMEOUT_EXPRESS=15m
 配置建议：
 
 - `ALIPAY_NOTIFY_URL` 必须是公网 HTTPS 后端地址
-- `ALIPAY_RETURN_URL` 应指向前端支付结果页，例如 `https://web.example.com/payment-result`
+- `ALIPAY_RETURN_URL` 应指向前端支付结果页，例如 `https://800ai.vip/payment-result`
 - 密钥只通过环境变量或 CI Secrets 注入，不要提交到仓库
 
 更详细说明见 `docs/alipay_payment_integration.md`。
@@ -229,7 +234,7 @@ ALIPAY_TIMEOUT_EXPRESS=15m
 
 ### 前端
 
-适合部署到 CloudBase 静态网站托管：
+适合部署到 CloudBase 静态网站托管或 Vercel：
 
 ```bash
 cd frontend
@@ -239,7 +244,7 @@ npm run build
 
 构建后上传 `frontend/dist`，并配置：
 
-- `VITE_API_BASE_URL=https://your-api-domain`
+- `VITE_API_BASE_URL=https://api.800ai.vip`
 - `VITE_CLOUDBASE_ENV_ID=<your-env-id>`
 
 ### 后端
@@ -335,7 +340,8 @@ celery -A app.workers.celery_app worker --loglevel=info
 | GET | `/api/payment/return/alipay` | 支付完成后回跳前端结果页 |
 | POST | `/api/payment/webhook/alipay` | 支付宝异步回调 |
 
-完整接口说明请以运行后的 Swagger 为准：<http://localhost:8000/docs>
+完整接口说明请以运行后的 Swagger 为准：<http://localhost:8000/docs>  
+对外 API Key 场景请查看：<https://800ai.vip/docs-api/>
 
 ## 文档索引
 
@@ -345,9 +351,10 @@ celery -A app.workers.celery_app worker --loglevel=info
 - `docs/backend-security-checklist.md`：后端安全检查清单
 - `docs/user_agreement.md`：用户协议
 - `docs/privacy_policy.md`：隐私政策
+- `prd.md`：Web 产品需求说明
 
 ## 说明
 
 - `backend-api/` 是独立的 API 服务目录，适合 API Key / 第三方接入场景
-- `flutter_app/` 是移动端工程，功能覆盖以其当前代码实现为准，不与 Web 完全等同
-- `docs-api/` 用于维护独立的开发者 API 文档站点
+- 对外 API 文档与提示词灵感等站点已独立部署至 `https://800ai.vip`，不再维护于本仓库内
+- 前端品牌已统一为 **800AI**，生产域名使用 `800ai.vip`
