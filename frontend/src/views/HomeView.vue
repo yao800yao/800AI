@@ -189,7 +189,7 @@ onMounted(() => {
 
     <section class="section-block motion-fade-up" style="--motion-delay: 0.18s">
       <div class="section-heading">
-        <div class="section-title">为什么用 80AI</div>
+        <div class="section-title">为什么用 800AI</div>
         <div class="section-desc">不是只强调“能生成”，而是强调“稳定地生成出更好的图”。</div>
       </div>
 

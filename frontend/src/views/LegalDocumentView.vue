@@ -89,7 +89,7 @@ function parseLegalMarkdown(markdown: string): LegalBlock[] {
   <div class="legal-page">
     <a-card class="legal-card" :bordered="false">
       <div class="legal-header">
-        <div class="legal-eyebrow">80 AI</div>
+        <div class="legal-eyebrow">800AI</div>
         <h1>{{ currentDocument.title }}</h1>
       </div>
 

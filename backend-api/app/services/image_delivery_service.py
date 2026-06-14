@@ -13,7 +13,7 @@ from app.services.cos_service import CosRuntimeConfig, get_cos_config
 from app.services.task_service import is_task_generation_failure_credit_refunded
 
 _API_PUBLIC_CDN_HOST = "cdn.12ai.org"
-_API_PUBLIC_DISPLAY_HOST = "api.80ai.net"
+_API_PUBLIC_DISPLAY_HOST = "api.800ai.vip"
 
 
 def sanitize_api_public_message(text: str | None) -> str:

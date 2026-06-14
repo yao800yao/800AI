@@ -1997,17 +1997,6 @@ watch(() => auth.isLoggedIn, (isLoggedIn) => {
 
               <div class="settings-footer">
                 <div class="generate-link-tip">
-                  <div class="generate-link-tip-left">
-                    <a
-                      href="https://80ai.net/gptimage2-prompt"
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      class="generate-link-tip-anchor"
-                    >
-                      提示词灵感
-                    </a>
-                    (400+模版)
-                  </div>
                   <div class="generate-link-tip-right">
                     支持 <strong>8</strong> 张图片同时生成（{{ activeGenerationImageCount }} / {{ MAX_ACTIVE_GENERATION_IMAGES }}）
                   </div>
@@ -2282,17 +2271,6 @@ watch(() => auth.isLoggedIn, (isLoggedIn) => {
 
               <div class="settings-footer">
                 <div class="generate-link-tip">
-                  <div class="generate-link-tip-left">
-                    <a
-                      href="https://80ai.net/gptimage2-prompt"
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      class="generate-link-tip-anchor"
-                    >
-                      提示词灵感
-                    </a>
-                    (400+模版)
-                  </div>
                   <div class="generate-link-tip-right">
                     支持 <strong>8</strong> 张图片同时生成（{{ activeGenerationImageCount }} / {{ MAX_ACTIVE_GENERATION_IMAGES }}）
                   </div>
@@ -2388,19 +2366,6 @@ watch(() => auth.isLoggedIn, (isLoggedIn) => {
               </div>
 
               <div class="settings-footer">
-                <div class="generate-link-tip">
-                  <div class="generate-link-tip-left">
-                    <a
-                      href="https://80ai.net/gptimage2-prompt"
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      class="generate-link-tip-anchor"
-                    >
-                      提示词灵感
-                    </a>
-                    (400+模版)
-                  </div>
-                </div>
                 <a-button
                   type="primary"
                   block
@@ -3137,26 +3102,10 @@ watch(() => auth.isLoggedIn, (isLoggedIn) => {
   color: var(--text-secondary);
 }
 
-.generate-link-tip-left,
 .generate-link-tip-right {
   min-width: 0;
-}
-
-.generate-link-tip-right {
   flex-shrink: 0;
   text-align: right;
-}
-
-.generate-link-tip-anchor {
-  color: var(--theme-accent-text);
-  font-weight: 600;
-  text-decoration: none;
-}
-
-.generate-link-tip-anchor:hover,
-.generate-link-tip-anchor:focus {
-  color: var(--theme-accent-text-hover);
-  text-decoration: underline;
 }
 
 .config-section {

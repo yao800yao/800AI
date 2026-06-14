@@ -954,10 +954,10 @@ watch(purchaseDialogOpen, (open) => {
         <div class="header-brand-wrap">
           <div class="header-brand" @click="router.push('/')">
             <div class="brand-mark">
-              <img src="/香蕉.svg" alt="80AI" class="brand-mark-image" />
+              <img src="/香蕉.svg" alt="800AI" class="brand-mark-image" />
             </div>
             <div class="brand-copy">
-              <span class="brand-name">80AI</span>
+              <span class="brand-name">800AI</span>
               <span class="brand-sub">AI Creative Studio</span>
             </div>
           </div>
@@ -1046,9 +1046,6 @@ watch(purchaseDialogOpen, (open) => {
         </a-menu>
 
         <div class="header-actions">
-          <a-button type="text" class="top-link-btn" @click="openPurchaseEntry">
-            购买积分
-          </a-button>
           <a-button type="text" class="top-link-btn" @click="openRedeemEntry">
             兑换积分
           </a-button>
@@ -1159,10 +1156,10 @@ watch(purchaseDialogOpen, (open) => {
         <div class="mobile-drawer-brand">
           <div class="mobile-drawer-brand-main">
             <div class="brand-mark">
-              <img src="/香蕉.svg" alt="80AI" class="brand-mark-image" />
+              <img src="/香蕉.svg" alt="800AI" class="brand-mark-image" />
             </div>
             <div class="brand-copy">
-              <span class="brand-name">80AI</span>
+              <span class="brand-name">800AI</span>
               <span class="brand-sub">AI Creative Studio</span>
             </div>
           </div>
@@ -1207,10 +1204,6 @@ watch(purchaseDialogOpen, (open) => {
         <div class="mobile-drawer-section">
           <div class="mobile-drawer-section-title">积分服务</div>
           <div class="mobile-drawer-credit-actions">
-            <a-button block class="mobile-drawer-action-btn" @click="openPurchaseEntry">
-              <template #icon><ThunderboltOutlined /></template>
-              购买积分
-            </a-button>
             <a-button block class="mobile-drawer-action-btn" @click="openRedeemEntry">
               <template #icon><GiftOutlined /></template>
               兑换积分
