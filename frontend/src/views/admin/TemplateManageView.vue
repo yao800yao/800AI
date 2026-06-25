@@ -54,7 +54,7 @@ const form = reactive<TemplatePayload>({
   custom_size: "",
   result_image: "",
   sort_order: 0,
-  tag_names: [],
+  tag_ids: [],
 });
 
 const columns = [
@@ -89,7 +89,6 @@ const customSizeOptions = computed(() => (
     : []
 ));
 
-const tagOptions = computed(() => assignableTagOptions.value);
 const selectedModelOption = computed(() => modelOptions.value.find((item) => item.model_key === form.model) || null);
 const hideResolution = computed(() => !!selectedModelOption.value?.hide_resolution);
 const hideCustomSize = computed(() => !!selectedModelOption.value?.hide_custom_size);
@@ -144,10 +143,11 @@ const assignableTagOptions = computed(() =>
     const children = tags.value.filter((tag) => tag.parent_id === parent.id);
     return children.map((child) => ({
       label: `${parent.name} / ${child.name}`,
-      value: child.name,
+      value: child.id,
     }));
   })
 );
+const tagOptions = computed(() => assignableTagOptions.value);
 
 function resetForm() {
   editingId.value = null;
@@ -160,7 +160,7 @@ function resetForm() {
   form.custom_size = "";
   form.result_image = "";
   form.sort_order = 0;
-  form.tag_names = [];
+  form.tag_ids = [];
 }
 
 function resetTagForm() {
@@ -259,7 +259,7 @@ async function openEdit(item: CreativeTemplate) {
     form.custom_size = detail.custom_size || "";
     form.result_image = detail.result_image;
     form.sort_order = detail.sort_order ?? 0;
-    form.tag_names = detail.tags.map((tag) => tag.name);
+    form.tag_ids = detail.tags.map((tag) => tag.id);
     modalOpen.value = true;
   } catch {
     message.error("获取模版详情失败");
@@ -287,7 +287,7 @@ async function handleSave() {
       custom_size: hideCustomSize.value ? "" : form.custom_size,
       result_image: form.result_image,
       sort_order: Number.isFinite(form.sort_order) ? form.sort_order : 0,
-      tag_names: [...form.tag_names],
+      tag_ids: [...form.tag_ids],
     };
     if (editingId.value) await updateTemplate(editingId.value, payload);
     else await createTemplate(payload);
@@ -579,7 +579,7 @@ function fmtTime(t: string) {
           </a-form-item>
           <a-form-item label="所属标签">
             <a-select
-              v-model:value="form.tag_names"
+              v-model:value="form.tag_ids"
               class="warm-select"
               mode="multiple"
               :options="tagOptions"

@@ -11,7 +11,8 @@ export interface TemplatePayload {
   custom_size: string;
   result_image: string;
   sort_order: number;
-  tag_names: string[];
+  tag_ids: number[];
+  tag_names?: string[];
 }
 
 export interface TemplateTagPayload {

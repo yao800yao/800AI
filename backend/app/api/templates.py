@@ -148,10 +148,27 @@ def _validate_assignable_tag(db: Session, tag: TemplateTag) -> None:
             raise HTTPException(status_code=400, detail=f"标签「{tag.name}」是大标签，请使用其下的小标签")
 
 
-def _sync_template_tags(db: Session, template: Template, tag_names: list[str]):
+def _sync_template_tags(db: Session, template: Template, tag_names: list[str], tag_ids: list[int] | None = None):
     normalized_names = _normalize_tag_names(tag_names)
+    normalized_ids = []
+    seen_ids: set[int] = set()
+    for tag_id in tag_ids or []:
+        if tag_id in seen_ids:
+            continue
+        seen_ids.add(tag_id)
+        normalized_ids.append(tag_id)
+
     template.tag_relations.clear()
     db.flush()
+
+    if normalized_ids:
+        for tag_id in normalized_ids:
+            tag = db.query(TemplateTag).filter(TemplateTag.id == tag_id).first()
+            if not tag:
+                raise HTTPException(status_code=400, detail=f"标签 ID「{tag_id}」不存在")
+            _validate_assignable_tag(db, tag)
+            template.tag_relations.append(TemplateTagRelation(tag_id=tag.id))
+        return
 
     for tag_name in normalized_names:
         tag = db.query(TemplateTag).filter(TemplateTag.name == tag_name).first()
@@ -279,6 +296,9 @@ def delete_template_tag(
     if not tag:
         raise HTTPException(status_code=404, detail="标签不存在")
 
+    for child in db.query(TemplateTag).filter(TemplateTag.parent_id == tag_id).all():
+        db.delete(child)
+    db.flush()
     db.delete(tag)
     db.commit()
     return {"message": "删除成功"}
@@ -324,7 +344,7 @@ def create_template(
     )
     db.add(template)
     db.flush()
-    _sync_template_tags(db, template, body.tag_names)
+    _sync_template_tags(db, template, body.tag_names, body.tag_ids)
     db.commit()
     db.refresh(template)
     return _serialize_template_detail(template, cos_config=get_optional_cos_config(db))
@@ -352,7 +372,7 @@ def update_template(
     template.num_images = 1
     template.result_image = body.result_image
     template.sort_order = body.sort_order
-    _sync_template_tags(db, template, body.tag_names)
+    _sync_template_tags(db, template, body.tag_names, body.tag_ids)
     db.commit()
     db.refresh(template)
     return _serialize_template_detail(template, cos_config=get_optional_cos_config(db))
