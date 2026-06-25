@@ -42,11 +42,34 @@ def _normalize_tag_names(tag_names: list[str]) -> list[str]:
     return result
 
 
+def _tag_sort_key(tag: TemplateTag) -> tuple:
+    return (
+        tag.parent_id is not None,
+        tag.sort_order or 0,
+        tag.name.lower(),
+    )
+
+
+def _count_tag_templates(tag: TemplateTag) -> int:
+    return len(tag.template_relations)
+
+
+def _count_parent_tag_templates(tag: TemplateTag) -> int:
+    template_ids = {rel.template_id for rel in tag.template_relations}
+    for child in tag.children or []:
+        template_ids.update(rel.template_id for rel in child.template_relations)
+    return len(template_ids)
+
+
 def _serialize_tag(tag: TemplateTag) -> dict:
+    is_parent = tag.parent_id is None
+    template_count = _count_parent_tag_templates(tag) if is_parent else _count_tag_templates(tag)
     return {
         "id": tag.id,
         "name": tag.name,
-        "template_count": len(tag.template_relations),
+        "parent_id": tag.parent_id,
+        "sort_order": tag.sort_order or 0,
+        "template_count": template_count,
     }
 
 
@@ -64,7 +87,12 @@ def _serialize_template_list_item(template: Template, *, cos_config=None) -> dic
         "custom_size": template.custom_size or "",
         "num_images": 1,
         "tags": [
-            {"id": rel.tag.id, "name": rel.tag.name}
+            {
+                "id": rel.tag.id,
+                "name": rel.tag.name,
+                "parent_id": rel.tag.parent_id,
+                "sort_order": rel.tag.sort_order or 0,
+            }
             for rel in sorted(template.tag_relations, key=lambda rel: rel.tag.name.lower())
             if rel.tag
         ],
@@ -84,6 +112,42 @@ def _serialize_template_detail(template: Template, *, cos_config=None) -> dict:
     }
 
 
+def _find_duplicate_tag_name(db: Session, name: str, parent_id: int | None, exclude_id: int | None = None) -> TemplateTag | None:
+    query = db.query(TemplateTag).filter(TemplateTag.name == name)
+    if parent_id is None:
+        query = query.filter(TemplateTag.parent_id.is_(None))
+    else:
+        query = query.filter(TemplateTag.parent_id == parent_id)
+    if exclude_id is not None:
+        query = query.filter(TemplateTag.id != exclude_id)
+    return query.first()
+
+
+def _validate_tag_parent(db: Session, parent_id: int | None, *, tag_id: int | None = None) -> TemplateTag | None:
+    if parent_id is None:
+        return None
+
+    parent = db.query(TemplateTag).filter(TemplateTag.id == parent_id).first()
+    if not parent:
+        raise HTTPException(status_code=400, detail="所属大标签不存在")
+    if parent.parent_id is not None:
+        raise HTTPException(status_code=400, detail="只支持两级标签，小标签不能再有子标签")
+    if tag_id is not None and parent_id == tag_id:
+        raise HTTPException(status_code=400, detail="标签不能设置为自己所属的大标签")
+    return parent
+
+
+def _validate_assignable_tag(db: Session, tag: TemplateTag) -> None:
+    if tag.parent_id is None:
+        has_children = (
+            db.query(TemplateTag.id)
+            .filter(TemplateTag.parent_id == tag.id)
+            .first()
+        )
+        if has_children:
+            raise HTTPException(status_code=400, detail=f"标签「{tag.name}」是大标签，请使用其下的小标签")
+
+
 def _sync_template_tags(db: Session, template: Template, tag_names: list[str]):
     normalized_names = _normalize_tag_names(tag_names)
     template.tag_relations.clear()
@@ -92,23 +156,42 @@ def _sync_template_tags(db: Session, template: Template, tag_names: list[str]):
     for tag_name in normalized_names:
         tag = db.query(TemplateTag).filter(TemplateTag.name == tag_name).first()
         if not tag:
-            tag = TemplateTag(name=tag_name)
-            db.add(tag)
-            db.flush()
+            raise HTTPException(status_code=400, detail=f"标签「{tag_name}」不存在，请先在标签管理中创建")
+        _validate_assignable_tag(db, tag)
         template.tag_relations.append(TemplateTagRelation(tag_id=tag.id))
+
+
+def _child_tag_ids(db: Session, parent_id: int) -> list[int]:
+    return [
+        tag_id
+        for (tag_id,) in db.query(TemplateTag.id).filter(TemplateTag.parent_id == parent_id).all()
+    ]
+
+
+def _apply_template_tag_filter(query, db: Session, *, tag_id: int | None, parent_id: int | None):
+    if tag_id is not None:
+        return query.join(TemplateTagRelation).filter(TemplateTagRelation.tag_id == tag_id)
+    if parent_id is not None:
+        child_ids = _child_tag_ids(db, parent_id)
+        tag_ids = child_ids if child_ids else [parent_id]
+        return query.join(TemplateTagRelation).filter(TemplateTagRelation.tag_id.in_(tag_ids))
+    return query
 
 
 @router.get("", response_model=TemplateListResponse)
 def list_templates(
     tag_id: int | None = Query(None),
+    parent_id: int | None = Query(None),
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
     db: Session = Depends(get_db),
 ):
+    if tag_id is not None and parent_id is not None:
+        raise HTTPException(status_code=400, detail="tag_id 与 parent_id 不能同时传")
+
     cos_config = get_optional_cos_config(db)
     query = db.query(Template).order_by(Template.sort_order.desc(), Template.created_at.desc())
-    if tag_id is not None:
-        query = query.join(TemplateTagRelation).filter(TemplateTagRelation.tag_id == tag_id)
+    query = _apply_template_tag_filter(query, db, tag_id=tag_id, parent_id=parent_id)
     total = query.count()
     templates = query.offset((page - 1) * page_size).limit(page_size).all()
     return {
@@ -119,7 +202,8 @@ def list_templates(
 
 @router.get("/tags", response_model=list[TemplateTagOut])
 def list_template_tags(db: Session = Depends(get_db)):
-    tags = db.query(TemplateTag).order_by(TemplateTag.name.asc()).all()
+    tags = db.query(TemplateTag).all()
+    tags.sort(key=_tag_sort_key)
     return [_serialize_tag(tag) for tag in tags]
 
 
@@ -133,11 +217,15 @@ def create_template_tag(
     if not tag_name:
         raise HTTPException(status_code=400, detail="标签名称不能为空")
 
-    existing_tag = db.query(TemplateTag).filter(TemplateTag.name == tag_name).first()
-    if existing_tag:
-        raise HTTPException(status_code=400, detail="标签已存在")
+    _validate_tag_parent(db, body.parent_id)
+    if _find_duplicate_tag_name(db, tag_name, body.parent_id):
+        raise HTTPException(status_code=400, detail="同级标签名称已存在")
 
-    tag = TemplateTag(name=tag_name)
+    tag = TemplateTag(
+        name=tag_name,
+        parent_id=body.parent_id,
+        sort_order=body.sort_order or 0,
+    )
     db.add(tag)
     db.commit()
     db.refresh(tag)
@@ -159,11 +247,23 @@ def update_template_tag(
     if not tag_name:
         raise HTTPException(status_code=400, detail="标签名称不能为空")
 
-    existing_tag = db.query(TemplateTag).filter(TemplateTag.name == tag_name, TemplateTag.id != tag_id).first()
-    if existing_tag:
-        raise HTTPException(status_code=400, detail="标签已存在")
+    has_children = (
+        db.query(TemplateTag.id)
+        .filter(TemplateTag.parent_id == tag.id)
+        .first()
+    )
+    if has_children and body.parent_id is not None:
+        raise HTTPException(status_code=400, detail="大标签不能设置所属大标签")
+
+    next_parent_id = None if has_children else body.parent_id
+
+    _validate_tag_parent(db, next_parent_id, tag_id=tag.id)
+    if _find_duplicate_tag_name(db, tag_name, next_parent_id, exclude_id=tag.id):
+        raise HTTPException(status_code=400, detail="同级标签名称已存在")
 
     tag.name = tag_name
+    tag.parent_id = next_parent_id
+    tag.sort_order = body.sort_order if body.sort_order is not None else (tag.sort_order or 0)
     db.commit()
     db.refresh(tag)
     return _serialize_tag(tag)

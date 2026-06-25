@@ -155,7 +155,10 @@
 
 ### `template_tags`
 
-- `name`: 标签名称，唯一。
+- `name`: 标签名称，同级唯一。
+- `parent_id`: 所属大标签 ID；为空表示大标签。
+- `sort_order`: 标签排序。
+- `parent_key`: 生成列，用于 `(parent_key, name)` 同级唯一约束。
 - `created_at`: 标签创建时间。
 
 ### `template_tag_relations`
@@ -408,9 +411,14 @@ CREATE TABLE external_api_configs (
 CREATE TABLE template_tags (
   id INT NOT NULL AUTO_INCREMENT,
   name VARCHAR(50) NOT NULL,
-  UNIQUE KEY uq_template_tags_name (name),
+  parent_id INT NULL,
+  sort_order INT NOT NULL DEFAULT 0,
+  parent_key INT AS (IFNULL(parent_id, 0)) STORED,
   created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-  PRIMARY KEY (id)
+  PRIMARY KEY (id),
+  INDEX idx_template_tags_parent_id (parent_id),
+  UNIQUE KEY uq_template_tags_parent_key_name (parent_key, name),
+  CONSTRAINT fk_template_tags_parent FOREIGN KEY (parent_id) REFERENCES template_tags (id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE templates (

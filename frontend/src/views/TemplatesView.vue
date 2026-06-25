@@ -4,7 +4,7 @@ import { message } from "ant-design-vue";
 import { AppstoreOutlined, PictureOutlined, ThunderboltOutlined } from "@ant-design/icons-vue";
 import { useRouter } from "vue-router";
 import { getGenerationModels } from "@/api/config";
-import { getTemplateDetail, listTemplates, listTemplateTags } from "@/api/templates";
+import { getTemplateDetail, listTemplates, listTemplateTags, type TemplateListParams } from "@/api/templates";
 import { resolveImageUrl } from "@/api/images";
 import type { CreativeTemplate, GenerationModelOption, TemplateTag } from "@/types";
 import TemplateDetailDialog from "@/components/templates/TemplateDetailDialog.vue";
@@ -20,6 +20,7 @@ const total = ref(0);
 const templates = ref<CreativeTemplate[]>([]);
 const generationModels = ref<GenerationModelOption[]>([]);
 const tags = ref<TemplateTag[]>([]);
+const activeParentId = ref<number | null>(null);
 const activeTagId = ref<number | null>(null);
 const loadMoreAnchor = ref<HTMLElement | null>(null);
 let loadMoreObserver: IntersectionObserver | null = null;
@@ -41,6 +42,29 @@ const masonryColumns = computed(() => {
   return columns;
 });
 
+function sortTags(list: TemplateTag[]) {
+  return [...list].sort(
+    (a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0) || a.name.localeCompare(b.name, "zh-CN")
+  );
+}
+
+const parentTags = computed(() => sortTags(tags.value.filter((tag) => tag.parent_id == null)));
+const childTags = computed(() => {
+  if (activeParentId.value == null) return [];
+  return sortTags(tags.value.filter((tag) => tag.parent_id === activeParentId.value));
+});
+const showChildTags = computed(() => childTags.value.length > 0);
+
+function buildListParams(pageNum: number): TemplateListParams {
+  const params: TemplateListParams = { page: pageNum, pageSize: pageSize.value };
+  if (activeTagId.value) {
+    params.tagId = activeTagId.value;
+  } else if (activeParentId.value) {
+    params.parentId = activeParentId.value;
+  }
+  return params;
+}
+
 async function loadTags() {
   try {
     tags.value = await listTemplateTags();
@@ -52,7 +76,7 @@ async function loadTags() {
 async function loadTemplates() {
   loading.value = true;
   try {
-    const res = await listTemplates(1, pageSize.value, activeTagId.value || undefined);
+    const res = await listTemplates(buildListParams(1));
     templates.value = res.items;
     total.value = res.total;
     page.value = 1;
@@ -76,7 +100,7 @@ async function loadNextTemplatePage() {
   loadingMore.value = true;
   try {
     const nextPage = page.value + 1;
-    const res = await listTemplates(nextPage, pageSize.value, activeTagId.value || undefined);
+    const res = await listTemplates(buildListParams(nextPage));
     templates.value = [...templates.value, ...res.items];
     total.value = res.total;
     page.value = nextPage;
@@ -138,7 +162,13 @@ function useTemplate() {
   router.push("/generate");
 }
 
-function selectTag(tagId: number | null) {
+function selectParent(parentId: number | null) {
+  activeParentId.value = parentId;
+  activeTagId.value = null;
+  loadTemplates();
+}
+
+function selectChild(tagId: number | null) {
   activeTagId.value = tagId;
   loadTemplates();
 }
@@ -192,22 +222,47 @@ watch(loadMoreAnchor, (target) => {
     </div>
 
     <div class="tag-filter">
-      <a-tag
-        class="filter-tag"
-        :class="{ active: activeTagId === null }"
-        @click="selectTag(null)"
-      >
-        全部
-      </a-tag>
-      <a-tag
-        v-for="tag in tags"
-        :key="tag.id"
-        class="filter-tag"
-        :class="{ active: activeTagId === tag.id }"
-        @click="selectTag(tag.id)"
-      >
-        {{ tag.name }}
-      </a-tag>
+      <div class="tag-filter-row tag-filter-row-parent">
+        <button
+          type="button"
+          class="tag-nav-item"
+          :class="{ active: activeParentId === null }"
+          @click="selectParent(null)"
+        >
+          全部
+        </button>
+        <button
+          v-for="tag in parentTags"
+          :key="tag.id"
+          type="button"
+          class="tag-nav-item"
+          :class="{ active: activeParentId === tag.id }"
+          @click="selectParent(tag.id)"
+        >
+          {{ tag.name }}
+        </button>
+      </div>
+
+      <div v-if="showChildTags" class="tag-filter-row tag-filter-row-child">
+        <button
+          type="button"
+          class="tag-nav-item tag-nav-item-child"
+          :class="{ active: activeTagId === null }"
+          @click="selectChild(null)"
+        >
+          全部
+        </button>
+        <button
+          v-for="tag in childTags"
+          :key="tag.id"
+          type="button"
+          class="tag-nav-item tag-nav-item-child"
+          :class="{ active: activeTagId === tag.id }"
+          @click="selectChild(tag.id)"
+        >
+          {{ tag.name }}
+        </button>
+      </div>
     </div>
 
     <a-spin :spinning="loading">
@@ -391,39 +446,61 @@ watch(loadMoreAnchor, (target) => {
 
 .tag-filter {
   display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
-  padding: 2px 0 6px;
+  flex-direction: column;
+  gap: 10px;
+  padding: 2px 0 10px;
   animation: templates-fade-up var(--motion-duration-reveal-soft) var(--motion-ease-enter) 0.12s both;
 }
 
-.filter-tag {
+.tag-filter-row {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  flex-wrap: wrap;
+}
+
+.tag-filter-row-child {
+  padding-top: 2px;
+}
+
+.tag-nav-item {
+  position: relative;
+  border: 0;
+  background: transparent;
+  padding: 0 0 6px;
+  color: #6f6254;
+  font-size: 15px;
+  line-height: 1.4;
   cursor: pointer;
-  border-radius: 999px;
-  padding: 6px 12px;
-  font-weight: 600;
-  transition:
-    transform var(--motion-duration-press) var(--motion-ease-soft),
-    box-shadow var(--motion-duration-base) var(--motion-ease-soft),
-    background var(--motion-duration-base) var(--motion-ease-soft),
-    border-color var(--motion-duration-base) var(--motion-ease-soft),
-    color var(--motion-duration-base) var(--motion-ease-soft);
+  transition: color var(--motion-duration-base) var(--motion-ease-soft);
 
   &:hover {
-    transform: translateY(-1px);
-    box-shadow: 0 12px 22px rgba(236, 185, 88, 0.12);
-  }
-
-  &:active {
-    transform: scale(0.96);
+    color: #2f2418;
   }
 
   &.active {
-    color: #8a5400;
-    background: linear-gradient(180deg, #fff0cc, #ffe2a9);
-    border-color: #f0c46d;
-    box-shadow: 0 12px 22px rgba(236, 185, 88, 0.14);
+    color: #1f160d;
+    font-weight: 700;
+  }
+
+  &.active::after {
+    content: "";
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    height: 2px;
+    border-radius: 999px;
+    background: #1f160d;
+  }
+}
+
+.tag-nav-item-child {
+  font-size: 14px;
+  color: #85786a;
+
+  &.active {
+    color: #1f160d;
   }
 }
 
@@ -849,7 +926,7 @@ watch(loadMoreAnchor, (target) => {
   .template-card-body,
   .template-overlay,
   .template-overlay-text,
-  .filter-tag,
+  .tag-nav-item,
   .detail-preview img,
   .detail-refs img,
   :deep(.warm-primary-btn) {

@@ -33,6 +33,7 @@ const loading = ref(false);
 const modalOpen = ref(false);
 const saving = ref(false);
 const editingId = ref<number | null>(null);
+const activeParentId = ref<number | null>(null);
 const activeTagId = ref<number | null>(null);
 const tagManageOpen = ref(false);
 const savingTag = ref(false);
@@ -88,18 +89,65 @@ const customSizeOptions = computed(() => (
     : []
 ));
 
-const tagOptions = computed(() => tags.value.map((tag) => ({ label: tag.name, value: tag.name })));
+const tagOptions = computed(() => assignableTagOptions.value);
 const selectedModelOption = computed(() => modelOptions.value.find((item) => item.model_key === form.model) || null);
 const hideResolution = computed(() => !!selectedModelOption.value?.hide_resolution);
 const hideCustomSize = computed(() => !!selectedModelOption.value?.hide_custom_size);
 const filteredTemplates = computed(() => {
-  if (activeTagId.value === null) return templates.value;
-  return templates.value.filter((item) => item.tags.some((tag) => tag.id === activeTagId.value));
+  if (activeTagId.value !== null) {
+    return templates.value.filter((item) => item.tags.some((tag) => tag.id === activeTagId.value));
+  }
+  if (activeParentId.value !== null) {
+    const childIds = new Set(childTags.value.map((tag) => tag.id));
+    if (childIds.size) {
+      return templates.value.filter((item) => item.tags.some((tag) => childIds.has(tag.id)));
+    }
+    return templates.value.filter((item) => item.tags.some((tag) => tag.id === activeParentId.value));
+  }
+  return templates.value;
 });
 
 const renameForm = reactive({
   name: "",
+  parent_id: null as number | null,
+  sort_order: 0,
 });
+
+function sortTags(list: TemplateTag[]) {
+  return [...list].sort(
+    (a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0) || a.name.localeCompare(b.name, "zh-CN")
+  );
+}
+
+const parentTags = computed(() => sortTags(tags.value.filter((tag) => tag.parent_id == null)));
+const childTags = computed(() => {
+  if (activeParentId.value == null) return [];
+  return sortTags(tags.value.filter((tag) => tag.parent_id === activeParentId.value));
+});
+const showChildTags = computed(() => childTags.value.length > 0);
+const tagGroups = computed(() =>
+  parentTags.value.map((parent) => ({
+    parent,
+    children: sortTags(tags.value.filter((tag) => tag.parent_id === parent.id)),
+  }))
+);
+const parentTagOptions = computed(() =>
+  parentTags.value.map((tag) => ({ label: tag.name, value: tag.id }))
+);
+const tagType = ref<"parent" | "child">("parent");
+const editingTagHasChildren = computed(() => {
+  if (!editingTag.value) return false;
+  return tags.value.some((tag) => tag.parent_id === editingTag.value?.id);
+});
+const assignableTagOptions = computed(() =>
+  parentTags.value.flatMap((parent) => {
+    const children = tags.value.filter((tag) => tag.parent_id === parent.id);
+    return children.map((child) => ({
+      label: `${parent.name} / ${child.name}`,
+      value: child.name,
+    }));
+  })
+);
 
 function resetForm() {
   editingId.value = null;
@@ -118,6 +166,9 @@ function resetForm() {
 function resetTagForm() {
   editingTag.value = null;
   renameForm.name = "";
+  renameForm.parent_id = null;
+  renameForm.sort_order = 0;
+  tagType.value = "parent";
 }
 
 async function load() {
@@ -136,6 +187,9 @@ async function loadTags() {
     tags.value = await listTemplateTags();
     if (activeTagId.value !== null && !tags.value.some((tag) => tag.id === activeTagId.value)) {
       activeTagId.value = null;
+    }
+    if (activeParentId.value !== null && !tags.value.some((tag) => tag.id === activeParentId.value)) {
+      activeParentId.value = null;
     }
   } catch {
     // ignore
@@ -172,6 +226,24 @@ function openTagManage() {
 function openRenameTag(tag: TemplateTag) {
   editingTag.value = tag;
   renameForm.name = tag.name;
+  renameForm.parent_id = tag.parent_id ?? null;
+  renameForm.sort_order = tag.sort_order ?? 0;
+  tagType.value = tag.parent_id == null ? "parent" : "child";
+}
+
+function selectParent(parentId: number | null) {
+  activeParentId.value = parentId;
+  activeTagId.value = null;
+}
+
+function selectChild(tagId: number | null) {
+  activeTagId.value = tagId;
+}
+
+function formatTagLabel(tag: TemplateTag) {
+  if (tag.parent_id == null) return tag.name;
+  const parent = tags.value.find((item) => item.id === tag.parent_id);
+  return parent ? `${parent.name} / ${tag.name}` : tag.name;
 }
 
 async function openEdit(item: CreativeTemplate) {
@@ -237,14 +309,23 @@ async function handleSaveTag() {
     message.warning("请输入标签名称");
     return;
   }
+  if (tagType.value === "child" && !renameForm.parent_id) {
+    message.warning("请选择所属大标签");
+    return;
+  }
   savingTag.value = true;
   try {
+    const payload = {
+      name,
+      parent_id: editingTagHasChildren.value || tagType.value === "parent" ? null : renameForm.parent_id,
+      sort_order: renameForm.sort_order,
+    };
     if (editingTag.value) {
-      await updateTemplateTag(editingTag.value.id, { name });
+      await updateTemplateTag(editingTag.value.id, payload);
       message.success("标签更新成功");
       await Promise.all([load(), loadTags()]);
     } else {
-      await createTemplateTag({ name });
+      await createTemplateTag(payload);
       message.success("标签创建成功");
       await loadTags();
     }
@@ -360,18 +441,45 @@ function fmtTime(t: string) {
     </div>
 
     <div class="tag-filter-row motion-fade-up" style="--motion-delay: 120ms">
-      <a-tag class="manage-filter-tag" :class="{ active: activeTagId === null }" @click="activeTagId = null">
+      <button
+        type="button"
+        class="tag-nav-item"
+        :class="{ active: activeParentId === null && activeTagId === null }"
+        @click="selectParent(null)"
+      >
         全部模版
-      </a-tag>
-      <a-tag
-        v-for="tag in tags"
+      </button>
+      <button
+        v-for="tag in parentTags"
         :key="tag.id"
-        class="manage-filter-tag"
-        :class="{ active: activeTagId === tag.id }"
-        @click="activeTagId = tag.id"
+        type="button"
+        class="tag-nav-item"
+        :class="{ active: activeParentId === tag.id && activeTagId === null }"
+        @click="selectParent(tag.id)"
       >
         {{ tag.name }}
-      </a-tag>
+      </button>
+    </div>
+
+    <div v-if="showChildTags" class="tag-filter-row tag-filter-row-child motion-fade-up" style="--motion-delay: 160ms">
+      <button
+        type="button"
+        class="tag-nav-item tag-nav-item-child"
+        :class="{ active: activeTagId === null }"
+        @click="selectChild(null)"
+      >
+        全部
+      </button>
+      <button
+        v-for="tag in childTags"
+        :key="tag.id"
+        type="button"
+        class="tag-nav-item tag-nav-item-child"
+        :class="{ active: activeTagId === tag.id }"
+        @click="selectChild(tag.id)"
+      >
+        {{ tag.name }}
+      </button>
     </div>
 
     <div class="warm-card warm-table-card motion-fade-up motion-card-lift" style="--motion-delay: 200ms">
@@ -392,7 +500,7 @@ function fmtTime(t: string) {
           </template>
           <template v-else-if="column.key === 'tags'">
             <div class="tag-list">
-              <a-tag v-for="tag in record.tags" :key="tag.id" class="warm-tag">{{ tag.name }}</a-tag>
+              <a-tag v-for="tag in record.tags" :key="tag.id" class="warm-tag">{{ formatTagLabel(tag) }}</a-tag>
             </div>
           </template>
           <template v-else-if="column.dataIndex === 'sort_order'">
@@ -473,9 +581,9 @@ function fmtTime(t: string) {
             <a-select
               v-model:value="form.tag_names"
               class="warm-select"
-              mode="tags"
+              mode="multiple"
               :options="tagOptions"
-              placeholder="输入或选择标签"
+              placeholder="选择小标签"
             />
           </a-form-item>
         </div>
@@ -526,30 +634,73 @@ function fmtTime(t: string) {
       @cancel="resetTagForm"
     >
       <a-form layout="vertical" style="margin-top: 16px">
-        <a-form-item :label="editingTag ? '重命名标签' : '新增标签'">
+        <a-form-item :label="editingTag ? '编辑标签' : '新增标签'">
           <div class="tag-create-box">
             <a-input
               v-model:value="renameForm.name"
               class="warm-input"
               :maxlength="50"
-              :placeholder="editingTag ? '请输入新的标签名称' : '输入新标签名称'"
+              :placeholder="editingTag ? '请输入新的标签名称' : '输入标签名称'"
               @pressEnter="handleSaveTag"
+            />
+            <a-input-number
+              v-model:value="renameForm.sort_order"
+              class="warm-input-number"
+              :min="0"
+              :precision="0"
+              placeholder="排序"
             />
             <a-button v-if="editingTag" class="template-secondary-btn" @click="resetTagForm">取消编辑</a-button>
           </div>
         </a-form-item>
+        <a-form-item v-if="!editingTagHasChildren" label="标签类型">
+          <a-radio-group v-model:value="tagType">
+            <a-radio value="parent">大标签</a-radio>
+            <a-radio value="child">小标签</a-radio>
+          </a-radio-group>
+        </a-form-item>
+        <a-form-item
+          v-if="!editingTagHasChildren && tagType === 'child'"
+          label="所属大标签"
+        >
+          <a-select
+            v-model:value="renameForm.parent_id"
+            class="warm-select"
+            :options="parentTagOptions"
+            placeholder="请选择大标签"
+          />
+        </a-form-item>
       </a-form>
 
-      <div v-if="tags.length" class="tag-manage-list">
-        <div v-for="tag in tags" :key="tag.id" class="tag-manage-item">
-          <div class="tag-manage-main">
-            <a-tag class="warm-tag">{{ tag.name }}</a-tag>
-            <span class="tag-manage-count">关联 {{ tag.template_count ?? 0 }} 个模版</span>
+      <div v-if="tagGroups.length" class="tag-manage-list">
+        <div v-for="group in tagGroups" :key="group.parent.id" class="tag-manage-group">
+          <div class="tag-manage-item tag-manage-item-parent">
+            <div class="tag-manage-main">
+              <a-tag class="warm-tag">{{ group.parent.name }}</a-tag>
+              <span class="tag-manage-type">大标签</span>
+              <span class="tag-manage-count">关联 {{ group.parent.template_count ?? 0 }} 个模版</span>
+            </div>
+            <div class="tag-manage-actions">
+              <a-button type="link" size="small" class="template-action-btn template-action-btn-primary" @click="openRenameTag(group.parent)">编辑</a-button>
+              <a-divider type="vertical" />
+              <a-button type="link" danger size="small" class="template-action-btn template-action-btn-danger" @click="handleDeleteTag(group.parent)">删除</a-button>
+            </div>
           </div>
-          <div class="tag-manage-actions">
-            <a-button type="link" size="small" class="template-action-btn template-action-btn-primary" @click="openRenameTag(tag)">重命名</a-button>
-            <a-divider type="vertical" />
-            <a-button type="link" danger size="small" class="template-action-btn template-action-btn-danger" @click="handleDeleteTag(tag)">删除</a-button>
+          <div
+            v-for="child in group.children"
+            :key="child.id"
+            class="tag-manage-item tag-manage-item-child"
+          >
+            <div class="tag-manage-main">
+              <a-tag class="warm-tag">{{ child.name }}</a-tag>
+              <span class="tag-manage-type">小标签</span>
+              <span class="tag-manage-count">关联 {{ child.template_count ?? 0 }} 个模版</span>
+            </div>
+            <div class="tag-manage-actions">
+              <a-button type="link" size="small" class="template-action-btn template-action-btn-primary" @click="openRenameTag(child)">编辑</a-button>
+              <a-divider type="vertical" />
+              <a-button type="link" danger size="small" class="template-action-btn template-action-btn-danger" @click="handleDeleteTag(child)">删除</a-button>
+            </div>
           </div>
         </div>
       </div>
@@ -593,8 +744,68 @@ function fmtTime(t: string) {
 .tag-filter-row {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
+  gap: 18px;
   margin-bottom: 16px;
+}
+
+.tag-filter-row-child {
+  margin-top: -8px;
+}
+
+.tag-nav-item {
+  position: relative;
+  border: 0;
+  background: transparent;
+  padding: 0 0 6px;
+  color: #6f6254;
+  font-size: 15px;
+  line-height: 1.4;
+  cursor: pointer;
+
+  &.active {
+    color: #1f160d;
+    font-weight: 700;
+  }
+
+  &.active::after {
+    content: "";
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    height: 2px;
+    border-radius: 999px;
+    background: #1f160d;
+  }
+}
+
+.tag-nav-item-child {
+  font-size: 14px;
+  color: #85786a;
+}
+
+.tag-manage-group {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-bottom: 12px;
+  margin-bottom: 12px;
+  border-bottom: 1px solid rgba(140, 108, 66, 0.12);
+}
+
+.tag-manage-group:last-child {
+  margin-bottom: 0;
+  padding-bottom: 0;
+  border-bottom: 0;
+}
+
+.tag-manage-item-child {
+  margin-left: 18px;
+}
+
+.tag-manage-type {
+  color: #9a8568;
+  font-size: 12px;
 }
 
 .manage-filter-tag {

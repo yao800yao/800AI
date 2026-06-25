@@ -16,14 +16,26 @@ export interface TemplatePayload {
 
 export interface TemplateTagPayload {
   name: string;
+  parent_id?: number | null;
+  sort_order?: number;
 }
 
-export function listTemplates(page: number = 1, pageSize: number = 20, tagId?: number): Promise<TemplateListResponse> {
-  const params: Record<string, unknown> = {};
-  params.page = page;
-  params.page_size = pageSize;
-  if (tagId) params.tag_id = tagId;
-  return client.get("/templates", { params });
+export interface TemplateListParams {
+  page?: number;
+  pageSize?: number;
+  tagId?: number;
+  parentId?: number;
+}
+
+export function listTemplates(params: TemplateListParams = {}): Promise<TemplateListResponse> {
+  const { page = 1, pageSize = 20, tagId, parentId } = params;
+  const query: Record<string, unknown> = {
+    page,
+    page_size: pageSize,
+  };
+  if (tagId) query.tag_id = tagId;
+  if (parentId) query.parent_id = parentId;
+  return client.get("/templates", { params: query });
 }
 
 export function listTemplateTags(): Promise<TemplateTag[]> {

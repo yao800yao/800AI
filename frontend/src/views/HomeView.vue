@@ -45,7 +45,7 @@ const marqueeItems = computed(() => [...showcaseItems.value, ...showcaseItems.va
 async function loadShowcase() {
   loadingShowcase.value = true;
   try {
-    const res = await listTemplates(1, 12);
+    const res = await listTemplates({ page: 1, pageSize: 12 });
     showcaseItems.value = res.items.filter((item) => !!item.result_image).slice(0, 10);
   } catch {
     showcaseItems.value = [];

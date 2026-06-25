@@ -455,6 +455,8 @@ export interface AdminRedeemKeyBatchResult {
 export interface TemplateTag {
   id: number;
   name: string;
+  parent_id?: number | null;
+  sort_order?: number;
   template_count?: number;
 }
 

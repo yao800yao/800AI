@@ -173,14 +173,13 @@ const userMenuItems = computed(() => [
   { key: "profile", label: "个人主页", icon: UserOutlined, danger: false },
   { key: "credits", label: "积分明细", icon: ThunderboltOutlined, danger: false },
   ...(canManagePromoCodes.value ? [{ key: "promo-codes", label: "我的推广码", icon: GiftOutlined, danger: false }] : []),
-  { key: "api-keys", label: "API 调用", icon: KeyOutlined, danger: false },
   { key: "settings", label: "设置", icon: SettingOutlined, danger: false },
   { key: "my-feedback", label: "我的反馈", icon: MessageOutlined, danger: false },
   { key: "system-messages", label: "系统消息", icon: MailOutlined, danger: false },
   { key: "logout", label: "退出登录", icon: LogoutOutlined, danger: true },
 ]);
 const userMenuAccountItems = computed(() =>
-  userMenuItems.value.filter((item) => ["profile", "credits", "promo-codes", "api-keys", "settings"].includes(item.key))
+  userMenuItems.value.filter((item) => ["profile", "credits", "promo-codes", "settings"].includes(item.key))
 );
 const userMenuNoticeItems = computed(() =>
   userMenuItems.value.filter((item) => ["my-feedback", "system-messages"].includes(item.key))

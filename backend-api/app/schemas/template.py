@@ -1,10 +1,13 @@
 from datetime import datetime
+
 from pydantic import BaseModel, Field
 
 
 class TemplateTagOut(BaseModel):
     id: int
     name: str
+    parent_id: int | None = None
+    sort_order: int = 0
     template_count: int = 0
 
     model_config = {"from_attributes": True}
@@ -12,6 +15,8 @@ class TemplateTagOut(BaseModel):
 
 class TemplateTagPayload(BaseModel):
     name: str
+    parent_id: int | None = None
+    sort_order: int = 0
 
 
 class TemplateBase(BaseModel):
