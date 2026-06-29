@@ -44,6 +44,11 @@ class TemplateUpdate(TemplateBase):
 class TemplateFromTaskCreate(BaseModel):
     task_id: str
     image_id: int
+    prompt: str = ""
+    model: str = "banana_pro"
+    size: str = "1:1"
+    resolution: str = "2K"
+    custom_size: str = ""
     sort_order: int = 0
     tag_ids: list[int] = []
     tag_names: list[str] = []

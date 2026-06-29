@@ -24,6 +24,13 @@ export interface TemplateTagPayload {
 export interface TemplateFromTaskPayload {
   task_id: string;
   image_id: number;
+  prompt: string;
+  model: string;
+  size: string;
+  resolution: string;
+  custom_size: string;
+  sort_order: number;
+  tag_ids: number[];
 }
 
 export interface TemplateListParams {

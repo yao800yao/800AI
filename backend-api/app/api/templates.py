@@ -359,7 +359,8 @@ def create_template_from_task(
         raise HTTPException(status_code=400, detail="仅支持从已成功的生图任务创建模版")
     if task.mode == "promptReverse":
         raise HTTPException(status_code=400, detail="提示词反推记录不能创建生图模版")
-    if not (task.prompt or "").strip():
+    prompt = (body.prompt or task.prompt or "").strip()
+    if not prompt:
         raise HTTPException(status_code=400, detail="任务提示词为空，无法创建模版")
 
     image = db.query(Image).filter(Image.id == body.image_id, Image.task_id == task.id).first()
@@ -372,12 +373,12 @@ def create_template_from_task(
         for index, ref in enumerate(_parse_reference_images(task.reference_images))
     ]
     template = Template(
-        prompt=(task.prompt or "").strip(),
-        model=(task.model or "").strip() or "banana_pro",
+        prompt=prompt,
+        model=(body.model or task.model or "").strip() or "banana_pro",
         reference_images=json.dumps(reference_images),
-        size=task.size or "1:1",
-        resolution=task.resolution or "2K",
-        custom_size=(task.custom_size or "").strip(),
+        size=body.size or task.size or "1:1",
+        resolution=body.resolution if body.resolution is not None else (task.resolution or "2K"),
+        custom_size=(body.custom_size if body.custom_size is not None else (task.custom_size or "")).strip(),
         num_images=1,
         result_image=result_image,
         sort_order=body.sort_order,
