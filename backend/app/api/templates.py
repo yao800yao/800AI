@@ -1,10 +1,13 @@
 import json
+from pathlib import Path
+from urllib.parse import urlparse
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
-from app.api.deps import require_admin
+from app.api.deps import require_admin, require_superadmin
 from app.database import get_db
+from app.models.image import Image
 from app.models.template import Template
 from app.models.template_tag import TemplateTag
 from app.models.template_tag_relation import TemplateTagRelation
@@ -12,12 +15,15 @@ from app.models.user import User
 from app.schemas.template import (
     TemplateCreate,
     TemplateDetailOut,
+    TemplateFromTaskCreate,
     TemplateListItemOut,
     TemplateListResponse,
     TemplateTagPayload,
     TemplateTagOut,
     TemplateUpdate,
 )
+from app.services.business_id_service import require_task_by_business_id
+from app.services.cos_service import build_object_key, load_image_bytes, upload_bytes_to_cos
 from app.services.image_delivery_service import get_optional_cos_config, serialize_asset_urls
 
 router = APIRouter(prefix="/api/templates", tags=["创意模版"])
@@ -110,6 +116,34 @@ def _serialize_template_detail(template: Template, *, cos_config=None) -> dict:
         "reference_images": [asset["image_url"] for asset in reference_assets],
         "reference_image_thumbs": [asset["thumb_url"] for asset in reference_assets],
     }
+
+
+def _parse_reference_images(value: str | None) -> list[str]:
+    try:
+        parsed = json.loads(value or "[]")
+    except json.JSONDecodeError:
+        return []
+    if not isinstance(parsed, list):
+        return []
+    return [str(item).strip() for item in parsed if str(item).strip()]
+
+
+def _copy_image_to_template_storage(db: Session, image_url: str, label: str) -> str:
+    loaded = load_image_bytes(image_url)
+    if not loaded:
+        raise HTTPException(status_code=400, detail=f"{label}不存在或已过期，无法创建模版")
+
+    data, content_type = loaded
+    parsed_name = Path(urlparse(image_url).path).name
+    file_name = parsed_name or f"{label}.jpg"
+    key = build_object_key("template", file_name, content_type)
+    return upload_bytes_to_cos(
+        db,
+        data=data,
+        key=key,
+        content_type=content_type,
+        cache_control="public, max-age=31536000",
+    )
 
 
 def _find_duplicate_tag_name(db: Session, name: str, parent_id: int | None, exclude_id: int | None = None) -> TemplateTag | None:
@@ -312,6 +346,48 @@ def list_admin_templates(
     cos_config = get_optional_cos_config(db)
     templates = db.query(Template).order_by(Template.sort_order.desc(), Template.created_at.desc()).all()
     return [_serialize_template_list_item(template, cos_config=cos_config) for template in templates]
+
+
+@router.post("/from-task", response_model=TemplateDetailOut)
+def create_template_from_task(
+    body: TemplateFromTaskCreate,
+    _user: User = Depends(require_superadmin),
+    db: Session = Depends(get_db),
+):
+    task = require_task_by_business_id(db, body.task_id)
+    if task.status != "success":
+        raise HTTPException(status_code=400, detail="仅支持从已成功的生图任务创建模版")
+    if task.mode == "promptReverse":
+        raise HTTPException(status_code=400, detail="提示词反推记录不能创建生图模版")
+    if not (task.prompt or "").strip():
+        raise HTTPException(status_code=400, detail="任务提示词为空，无法创建模版")
+
+    image = db.query(Image).filter(Image.id == body.image_id, Image.task_id == task.id).first()
+    if not image or image.status != "success" or not image.image_url:
+        raise HTTPException(status_code=400, detail="任务结果图不存在或尚未生成成功")
+
+    result_image = _copy_image_to_template_storage(db, image.image_url, "结果图")
+    reference_images = [
+        _copy_image_to_template_storage(db, ref, f"参考图 {index + 1}")
+        for index, ref in enumerate(_parse_reference_images(task.reference_images))
+    ]
+    template = Template(
+        prompt=(task.prompt or "").strip(),
+        model=(task.model or "").strip() or "banana_pro",
+        reference_images=json.dumps(reference_images),
+        size=task.size or "1:1",
+        resolution=task.resolution or "2K",
+        custom_size=(task.custom_size or "").strip(),
+        num_images=1,
+        result_image=result_image,
+        sort_order=body.sort_order,
+    )
+    db.add(template)
+    db.flush()
+    _sync_template_tags(db, template, body.tag_names, body.tag_ids)
+    db.commit()
+    db.refresh(template)
+    return _serialize_template_detail(template, cos_config=get_optional_cos_config(db))
 
 
 @router.get("/{template_id}", response_model=TemplateDetailOut)

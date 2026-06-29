@@ -21,6 +21,11 @@ export interface TemplateTagPayload {
   sort_order?: number;
 }
 
+export interface TemplateFromTaskPayload {
+  task_id: string;
+  image_id: number;
+}
+
 export interface TemplateListParams {
   page?: number;
   pageSize?: number;
@@ -65,6 +70,10 @@ export function listAdminTemplates(): Promise<CreativeTemplate[]> {
 
 export function createTemplate(data: TemplatePayload): Promise<CreativeTemplate> {
   return client.post("/templates", data);
+}
+
+export function createTemplateFromTask(data: TemplateFromTaskPayload): Promise<CreativeTemplate> {
+  return client.post("/templates/from-task", data);
 }
 
 export function updateTemplate(templateId: number, data: TemplatePayload): Promise<CreativeTemplate> {

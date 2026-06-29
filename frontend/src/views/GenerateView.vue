@@ -31,6 +31,7 @@ import {
 import { getTaskScenes } from "@/api/config";
 import { deleteHistoryTask, fetchHistory } from "@/api/history";
 import { createTask, getTasks } from "@/api/tasks";
+import { createTemplateFromTask } from "@/api/templates";
 import { deleteImage, getDisplayImageUrl, getDownloadUrl, getPreviewImageUrl, resolveImageUrl } from "@/api/images";
 import { reversePrompt } from "@/api/promptReverse";
 import { uploadReferenceImage } from "@/api/upload";
@@ -200,6 +201,7 @@ const feedbackTarget = ref<{
   prompt: string;
   createdAt: string;
 } | null>(null);
+const creatingTemplateKeys = ref<Set<string>>(new Set());
 const viewportWidth = ref(typeof window === "undefined" ? 1200 : window.innerWidth);
 const RESULT_COLUMN_OPTIONS = [2, 3, 4] as const;
 type ResultColumnOption = typeof RESULT_COLUMN_OPTIONS[number];
@@ -1454,6 +1456,51 @@ function canEditGeneratedImage(task: GeneratedTaskItem, img: ImageResult) {
   return img.status === "success" && !isGeneratedTaskExpired(task) && !!(img.image_url || img.preview_url);
 }
 
+function getTemplateCreationKey(task: Pick<GeneratedTaskItem, "taskId">, image: Pick<ImageResult, "id">) {
+  return `${task.taskId || "local"}:${image.id}`;
+}
+
+function isCreatingTemplate(task: GeneratedTaskItem, image: ImageResult) {
+  return creatingTemplateKeys.value.has(getTemplateCreationKey(task, image));
+}
+
+function setCreatingTemplate(task: GeneratedTaskItem, image: ImageResult, creating: boolean) {
+  const next = new Set(creatingTemplateKeys.value);
+  const key = getTemplateCreationKey(task, image);
+  if (creating) {
+    next.add(key);
+  } else {
+    next.delete(key);
+  }
+  creatingTemplateKeys.value = next;
+}
+
+function canCreateTemplateFromGeneratedTask(task: GeneratedTaskItem, image: ImageResult) {
+  return isSuperAdmin.value
+    && !!task.taskId
+    && task.status === "success"
+    && image.status === "success"
+    && image.id > 0
+    && !isGeneratedTaskExpired(task)
+    && !!image.image_url;
+}
+
+async function handleCreateTemplateFromGeneratedTask(task: GeneratedTaskItem, image: ImageResult) {
+  if (!task.taskId || image.id <= 0) return;
+  setCreatingTemplate(task, image, true);
+  try {
+    await createTemplateFromTask({
+      task_id: task.taskId,
+      image_id: image.id,
+    });
+    message.success("已创建为创意模版");
+  } catch (err: any) {
+    message.error(err?.response?.data?.detail || "创建模版失败");
+  } finally {
+    setCreatingTemplate(task, image, false);
+  }
+}
+
 function handleDownload(imageId: number, imageUrl: string, previewUrl?: string) {
   const a = document.createElement("a");
   a.href = getDownloadUrl(imageId, imageUrl, previewUrl);
@@ -2616,6 +2663,15 @@ watch(() => auth.isLoggedIn, (isLoggedIn) => {
                   >
                     <template v-if="item.image.status === 'success' && getGeneratedResultDisplayUrl(item.task, item.image)">
                       <img :src="getGeneratedResultDisplayUrl(item.task, item.image)" alt="生成结果" loading="lazy" />
+                      <a-button
+                        v-if="canCreateTemplateFromGeneratedTask(item.task, item.image)"
+                        class="template-glass-action"
+                        :loading="isCreatingTemplate(item.task, item.image)"
+                        @click.stop="handleCreateTemplateFromGeneratedTask(item.task, item.image)"
+                      >
+                        <template #icon><AppstoreOutlined /></template>
+                        设为模版
+                      </a-button>
                       <div class="result-actions">
                         <a-tooltip v-if="getGeneratedResultPreviewUrl(item.task, item.image)" title="查看原图">
                           <a-button shape="circle" class="icon-chip" @click.stop="handlePreview(getGeneratedResultPreviewUrl(item.task, item.image))">
@@ -4494,6 +4550,38 @@ watch(() => auth.isLoggedIn, (isLoggedIn) => {
   }
 }
 
+.template-glass-action {
+  position: absolute !important;
+  left: 50%;
+  bottom: 14px;
+  z-index: 3;
+  opacity: 0;
+  transform: translate(-50%, 8px);
+  pointer-events: none;
+  height: 34px !important;
+  padding: 0 14px !important;
+  border: 1px solid rgba(255, 240, 214, 0.22) !important;
+  border-radius: 999px !important;
+  background: rgba(76, 52, 26, 0.62) !important;
+  color: #fff7ea !important;
+  box-shadow: 0 12px 24px rgba(34, 22, 10, 0.24);
+  backdrop-filter: blur(12px);
+  transition:
+    opacity var(--motion-duration-fast) var(--motion-ease-soft),
+    transform var(--motion-duration-fast) var(--motion-ease-soft),
+    background var(--motion-duration-fast) var(--motion-ease-soft),
+    border-color var(--motion-duration-fast) var(--motion-ease-soft),
+    box-shadow var(--motion-duration-fast) var(--motion-ease-soft);
+
+  &:hover,
+  &:focus {
+    background: rgba(76, 52, 26, 0.82) !important;
+    border-color: rgba(255, 240, 214, 0.32) !important;
+    color: #fffdfa !important;
+    box-shadow: 0 16px 30px rgba(34, 22, 10, 0.3);
+  }
+}
+
 .result-top-actions {
   position: absolute;
   top: 12px;
@@ -4596,10 +4684,17 @@ watch(() => auth.isLoggedIn, (isLoggedIn) => {
 }
 
 .result-card:hover .result-actions,
-.result-card:focus-within .result-actions {
+.result-card:focus-within .result-actions,
+.result-card:hover .template-glass-action,
+.result-card:focus-within .template-glass-action {
   opacity: 1;
   transform: translateY(0);
   pointer-events: auto;
+}
+
+.result-card:hover .template-glass-action,
+.result-card:focus-within .template-glass-action {
+  transform: translate(-50%, 0);
 }
 
 .result-card:hover .result-more-trigger.icon-chip,

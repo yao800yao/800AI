@@ -3,6 +3,7 @@ import { computed, ref, onMounted, onBeforeUnmount, h, watch } from "vue";
 import { message, Modal } from "ant-design-vue";
 import dayjs from "dayjs";
 import {
+  AppstoreOutlined,
   CheckSquareOutlined,
   ClockCircleOutlined,
   DeleteOutlined,
@@ -19,6 +20,7 @@ import { getAdminHistoryCards, getCreditLogs as getAdminCreditLogs, listPaymentO
 import { getGenerationModels, getTaskScenes } from "@/api/config";
 import { deleteHistoryTask, fetchHistory, toggleHistoryPin } from "@/api/history";
 import { getDisplayImageUrl, getDownloadUrl, getPreviewImageUrl, resolveImageUrl } from "@/api/images";
+import { createTemplateFromTask } from "@/api/templates";
 import { deletePromptHistory } from "@/api/auth";
 import FeedbackDialog from "@/components/feedback/FeedbackDialog.vue";
 import HistoryDetailDialog from "@/components/history/HistoryDetailDialog.vue";
@@ -101,6 +103,7 @@ const previewSrc = ref("");
 const feedbackDialogOpen = ref(false);
 const feedbackTarget = ref<UserHistoryCard | null>(null);
 const pinningKeys = ref<string[]>([]);
+const creatingTemplateKeys = ref<Set<string>>(new Set());
 const isAdminHistoryView = computed(() => props.adminUserTasks && auth.isAdmin);
 const userInfoDialogOpen = ref(false);
 const userInfoLoading = ref(false);
@@ -491,6 +494,51 @@ function canHistoryViewOriginal(item: UserHistoryCard) {
 
 function canEditHistoryImage(item: UserHistoryCard) {
   return item.status !== "failed" && !isHistoryItemExpired(item);
+}
+
+function getHistoryTemplateCreationKey(item: UserHistoryCard) {
+  return `${item.task_id || "history"}:${item.image_id || "none"}`;
+}
+
+function isCreatingTemplateFromHistory(item: UserHistoryCard) {
+  return creatingTemplateKeys.value.has(getHistoryTemplateCreationKey(item));
+}
+
+function setCreatingTemplateFromHistory(item: UserHistoryCard, creating: boolean) {
+  const next = new Set(creatingTemplateKeys.value);
+  const key = getHistoryTemplateCreationKey(item);
+  if (creating) {
+    next.add(key);
+  } else {
+    next.delete(key);
+  }
+  creatingTemplateKeys.value = next;
+}
+
+function canCreateTemplateFromHistory(item: UserHistoryCard) {
+  return auth.isSuperAdmin
+    && item.status === "success"
+    && item.mode !== "promptReverse"
+    && !!item.task_id
+    && typeof item.image_id === "number"
+    && !isHistoryItemExpired(item)
+    && !!item.image_url;
+}
+
+async function handleCreateTemplateFromHistory(item: UserHistoryCard) {
+  if (!item.task_id || typeof item.image_id !== "number") return;
+  setCreatingTemplateFromHistory(item, true);
+  try {
+    await createTemplateFromTask({
+      task_id: item.task_id,
+      image_id: item.image_id,
+    });
+    message.success("已创建为创意模版");
+  } catch (err: any) {
+    message.error(err?.response?.data?.detail || "创建模版失败");
+  } finally {
+    setCreatingTemplateFromHistory(item, false);
+  }
 }
 
 function handleViewOriginal(item: UserHistoryCard) {
@@ -1026,6 +1074,15 @@ function handleEditImage(item: UserHistoryCard) {
               </template>
               <ClockCircleOutlined v-else />
             </div>
+            <a-button
+              v-if="canCreateTemplateFromHistory(item)"
+              class="history-template-glass-action"
+              :loading="isCreatingTemplateFromHistory(item)"
+              @click.stop="handleCreateTemplateFromHistory(item)"
+            >
+              <template #icon><AppstoreOutlined /></template>
+              设为模版
+            </a-button>
 
             <div v-if="getModelLabel(item.model)" class="result-card-model-badge" :title="getModelLabel(item.model)">
               {{ getModelLabel(item.model) }}
@@ -2000,10 +2057,49 @@ html:is([data-theme="dark"], [data-theme="midnight"]) .history-page .result-card
   right: 50px;
 }
 
+.history-template-glass-action {
+  position: absolute !important;
+  left: 50%;
+  bottom: 14px;
+  z-index: 3;
+  opacity: 0;
+  transform: translate(-50%, 8px);
+  pointer-events: none;
+  height: 34px !important;
+  padding: 0 14px !important;
+  border: 1px solid rgba(255, 240, 214, 0.22) !important;
+  border-radius: 999px !important;
+  background: rgba(76, 52, 26, 0.62) !important;
+  color: #fff7ea !important;
+  box-shadow: 0 12px 24px rgba(34, 22, 10, 0.24);
+  backdrop-filter: blur(12px);
+  transition:
+    opacity var(--motion-duration-fast) var(--motion-ease-soft),
+    transform var(--motion-duration-fast) var(--motion-ease-soft),
+    background var(--motion-duration-fast) var(--motion-ease-soft),
+    border-color var(--motion-duration-fast) var(--motion-ease-soft),
+    box-shadow var(--motion-duration-fast) var(--motion-ease-soft);
+
+  &:hover,
+  &:focus {
+    background: rgba(76, 52, 26, 0.82) !important;
+    border-color: rgba(255, 240, 214, 0.32) !important;
+    color: #fffdfa !important;
+    box-shadow: 0 16px 30px rgba(34, 22, 10, 0.3);
+  }
+}
+
 .result-card:hover .history-overlay-actions,
 .result-card:focus-within .history-overlay-actions {
   opacity: 1;
   transform: translateY(0);
+  pointer-events: auto;
+}
+
+.result-card:hover .history-template-glass-action,
+.result-card:focus-within .history-template-glass-action {
+  opacity: 1;
+  transform: translate(-50%, 0);
   pointer-events: auto;
 }
 

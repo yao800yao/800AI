@@ -41,6 +41,14 @@ class TemplateUpdate(TemplateBase):
     pass
 
 
+class TemplateFromTaskCreate(BaseModel):
+    task_id: str
+    image_id: int
+    sort_order: int = 0
+    tag_ids: list[int] = []
+    tag_names: list[str] = []
+
+
 class TemplateListItemOut(BaseModel):
     id: int
     prompt: str
