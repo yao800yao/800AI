@@ -228,7 +228,7 @@ watch(
                 <div class="profile-setting-row">
                   <div class="profile-setting-info">
                     <h4>上传头像</h4>
-                    <span>支持 JPG / PNG / WEBP / GIF，图片最大 1MB。</span>
+                    <span>支持 JPG / PNG / WEBP / GIF / HEIC / HEIF，图片最大 1MB。</span>
                   </div>
                   <div class="profile-setting-controls profile-setting-controls-avatar">
                     <a-avatar :size="56" class="profile-avatar profile-avatar-small" :src="avatarUrl || undefined">
@@ -237,7 +237,7 @@ watch(
                     <input
                       ref="avatarInput"
                       type="file"
-                      accept="image/png,image/jpeg,image/webp,image/gif"
+                      accept="image/*,.heic,.heif"
                       hidden
                       @change="handleAvatarChange"
                     />

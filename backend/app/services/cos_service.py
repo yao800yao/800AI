@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session
 from app.config import settings
 from app.models.api_key import ApiKey
 
-ALLOWED_IMAGE_TYPES = {"image/jpeg", "image/png", "image/webp", "image/gif"}
+ALLOWED_IMAGE_TYPES = {"image/jpeg", "image/png", "image/webp", "image/gif", "image/heic", "image/heif"}
 MAX_UPLOAD_SIZE = 10 * 1024 * 1024  # 10 MB
 UPLOAD_PURPOSE_PREFIXES = {
     "ref": "ref",
@@ -89,6 +89,26 @@ def infer_mime_type(file_name: str, fallback: str = "image/jpeg") -> str:
     return guessed or fallback
 
 
+def normalize_upload_content_type(file_name: str, content_type: str = "") -> str:
+    normalized = (content_type or "").split(";")[0].strip().lower()
+    if normalized:
+        return normalized
+    suffix = Path(file_name or "").suffix.lower()
+    if suffix in {".jpg", ".jpeg"}:
+        return "image/jpeg"
+    if suffix == ".png":
+        return "image/png"
+    if suffix == ".webp":
+        return "image/webp"
+    if suffix == ".gif":
+        return "image/gif"
+    if suffix == ".heic":
+        return "image/heic"
+    if suffix == ".heif":
+        return "image/heif"
+    return infer_mime_type(file_name, "")
+
+
 def _normalize_ext(file_name: str, content_type: str) -> str:
     suffix = Path(file_name or "").suffix.lower()
     if suffix:
@@ -99,14 +119,18 @@ def _normalize_ext(file_name: str, content_type: str) -> str:
         return ".webp"
     if content_type == "image/gif":
         return ".gif"
+    if content_type == "image/heic":
+        return ".heic"
+    if content_type == "image/heif":
+        return ".heif"
     return ".jpg"
 
 
 def validate_upload_request(file_name: str, file_size: int, content_type: str, purpose: str) -> None:
     if purpose not in UPLOAD_PURPOSE_PREFIXES or purpose == "generated":
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="不支持的上传用途")
-    if content_type not in ALLOWED_IMAGE_TYPES:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="仅支持 JPG/PNG/WEBP/GIF 格式")
+    if normalize_upload_content_type(file_name, content_type) not in ALLOWED_IMAGE_TYPES:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="仅支持 JPG/PNG/WEBP/GIF/HEIC/HEIF 格式")
     if file_size <= 0:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="文件大小无效")
     if file_size > MAX_UPLOAD_SIZE:
@@ -131,6 +155,7 @@ def create_upload_credential(
     file_size: int,
     content_type: str,
 ) -> dict:
+    content_type = normalize_upload_content_type(file_name, content_type)
     validate_upload_request(file_name, file_size, content_type, purpose)
     config = get_cos_config(db)
     key = build_object_key(purpose, file_name, content_type)

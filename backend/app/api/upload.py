@@ -10,6 +10,7 @@ from app.services.cos_service import (
     ALLOWED_IMAGE_TYPES,
     MAX_UPLOAD_SIZE,
     create_upload_credential,
+    normalize_upload_content_type,
 )
 from sqlalchemy.orm import Session
 
@@ -40,8 +41,9 @@ async def upload_image(
     file: UploadFile = File(...),
     user: User = Depends(get_current_user),
 ):
-    if file.content_type not in ALLOWED_IMAGE_TYPES:
-        raise HTTPException(status_code=400, detail="仅支持 JPG/PNG/WEBP/GIF 格式")
+    content_type = normalize_upload_content_type(file.filename or "", file.content_type or "")
+    if content_type not in ALLOWED_IMAGE_TYPES:
+        raise HTTPException(status_code=400, detail="仅支持 JPG/PNG/WEBP/GIF/HEIC/HEIF 格式")
 
     data = await file.read()
     if len(data) > MAX_UPLOAD_SIZE:

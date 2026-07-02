@@ -791,8 +791,11 @@ async function ensureAuthenticated() {
   }
 }
 
-async function triggerUpload() {
-  if (!(await ensureAuthenticated())) return;
+function triggerUpload() {
+  if (!auth.isLoggedIn) {
+    loginModalVisible.value = true;
+    return;
+  }
   fileInput.value?.click();
 }
 
@@ -904,7 +907,7 @@ function isReferenceFileDragEvent(event: DragEvent) {
 
 function isReferenceImageFile(file: File) {
   if (file.type.startsWith("image/")) return true;
-  return /\.(png|jpe?g|gif|webp|bmp|svg)$/i.test(file.name);
+  return /\.(png|jpe?g|gif|webp|heic|heif)$/i.test(file.name);
 }
 
 async function processReferenceDropFiles(files: File[]) {
@@ -976,6 +979,7 @@ async function handleFileChange(e: Event) {
   if (!files.length) return;
 
   try {
+    if (!(await ensureAuthenticated())) return;
     await uploadReferenceFiles(files);
   } finally {
     input.value = "";
@@ -988,8 +992,11 @@ function removeReference(index: number) {
   referenceItems.value.splice(index, 1);
 }
 
-async function triggerSourceUpload() {
-  if (!(await ensureAuthenticated())) return;
+function triggerSourceUpload() {
+  if (!auth.isLoggedIn) {
+    loginModalVisible.value = true;
+    return;
+  }
   sourceInput.value?.click();
 }
 
@@ -997,6 +1004,11 @@ async function handleSourceFileChange(e: Event) {
   const input = e.target as HTMLInputElement;
   const file = input.files?.[0];
   if (!file) return;
+
+  if (!(await ensureAuthenticated())) {
+    input.value = "";
+    return;
+  }
 
   if (file.size > 10 * 1024 * 1024) {
     message.warning("图片大小不能超过 10MB");
@@ -1033,8 +1045,11 @@ function removeSourceImage() {
   canRedoMask.value = false;
 }
 
-async function triggerReverseUpload() {
-  if (!(await ensureAuthenticated())) return;
+function triggerReverseUpload() {
+  if (!auth.isLoggedIn) {
+    loginModalVisible.value = true;
+    return;
+  }
   reverseInput.value?.click();
 }
 
@@ -1042,6 +1057,11 @@ async function handleReverseFileChange(e: Event) {
   const input = e.target as HTMLInputElement;
   const file = input.files?.[0];
   if (!file) return;
+
+  if (!(await ensureAuthenticated())) {
+    input.value = "";
+    return;
+  }
 
   if (file.size > 10 * 1024 * 1024) {
     message.warning("图片大小不能超过 10MB");

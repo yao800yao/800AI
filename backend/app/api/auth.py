@@ -47,10 +47,11 @@ from app.services.credit_redeem_service import redeem_credit_key
 from app.models.prompt_history import PromptHistory
 from app.services.admin_service import get_credit_logs
 from app.services.user_credit_service import get_user_credit_balance
+from app.services.cos_service import normalize_upload_content_type
 
 router = APIRouter(prefix="/api/auth", tags=["认证"])
 audit_logger = logging.getLogger("app.audit")
-ALLOWED_TYPES = {"image/jpeg", "image/png", "image/webp", "image/gif"}
+ALLOWED_TYPES = {"image/jpeg", "image/png", "image/webp", "image/gif", "image/heic", "image/heif"}
 AVATAR_MAX_SIZE = 1 * 1024 * 1024  # 1 MB
 
 
@@ -334,8 +335,9 @@ async def upload_avatar(
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    if file.content_type not in ALLOWED_TYPES:
-        raise HTTPException(status_code=400, detail="仅支持 JPG/PNG/WEBP/GIF 格式")
+    content_type = normalize_upload_content_type(file.filename or "", file.content_type or "")
+    if content_type not in ALLOWED_TYPES:
+        raise HTTPException(status_code=400, detail="仅支持 JPG/PNG/WEBP/GIF/HEIC/HEIF 格式")
 
     data = await file.read()
     if len(data) > AVATAR_MAX_SIZE:

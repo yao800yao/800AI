@@ -790,7 +790,7 @@ function getReferencePreviewUrl(item: UploadPreviewItem) {
 
 function isReferenceImageFile(file: File) {
   if (file.type.startsWith("image/")) return true;
-  return /\.(png|jpe?g|gif|webp|bmp|svg)$/i.test(file.name);
+  return /\.(png|jpe?g|gif|webp|heic|heif)$/i.test(file.name);
 }
 
 function isReferenceFileDragEvent(event: DragEvent) {
@@ -1015,19 +1015,21 @@ function removeReferenceItem(items: UploadPreviewItem[], index: number) {
 }
 
 function triggerGlobalReferenceUpload() {
-  void ensureAuthenticated().then((passed) => {
-    if (!passed) return;
-    globalFileInput.value?.click();
-  });
+  if (!auth.isLoggedIn) {
+    loginModalVisible.value = true;
+    return;
+  }
+  globalFileInput.value?.click();
 }
 
 function triggerCardReferenceUpload(cardId: string) {
   const card = cards.value.find((item) => item.id === cardId);
   if (!card || isCardLocked(card)) return;
-  void ensureAuthenticated().then((passed) => {
-    if (!passed) return;
-    cardFileInputs.get(cardId)?.click();
-  });
+  if (!auth.isLoggedIn) {
+    loginModalVisible.value = true;
+    return;
+  }
+  cardFileInputs.get(cardId)?.click();
 }
 
 async function handleGlobalReferenceChange(event: Event) {

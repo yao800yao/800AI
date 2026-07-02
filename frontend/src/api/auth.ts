@@ -1,4 +1,5 @@
 import client from "./client";
+import { normalizeImageFileForUpload } from "./upload";
 import type {
   LoginResponse,
   UserInfo,
@@ -66,9 +67,10 @@ export function updateProfile(payload: { username: string }): Promise<UserInfo> 
   return client.put("/auth/profile", payload);
 }
 
-export function uploadAvatar(file: File): Promise<UserInfo> {
+export async function uploadAvatar(file: File): Promise<UserInfo> {
+  const uploadFile = await normalizeImageFileForUpload(file);
   const formData = new FormData();
-  formData.append("file", file);
+  formData.append("file", uploadFile);
   return client.post("/auth/avatar", formData, {
     headers: { "Content-Type": "multipart/form-data" },
   });
