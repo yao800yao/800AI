@@ -65,10 +65,6 @@ const route = useRoute();
 const auth = useAuthStore();
 const isAdmin = computed(() => auth.isAdmin);
 const isSuperAdmin = computed(() => auth.isSuperAdmin);
-const canShowPurchaseEntry = computed(() => {
-  const role = String(auth.user?.role || "").trim();
-  return role === "admin" || role === "superadmin";
-});
 const showRegisterPromoCode = false;
 const hideTopMenu = computed(() => route.meta.hideTopMenu === true);
 const mobileDrawerOpen = ref(false);
@@ -743,7 +739,7 @@ async function checkAnnouncement() {
 }
 
 async function loadPaymentPlans() {
-  if (!auth.isLoggedIn || !canShowPurchaseEntry.value) return;
+  if (!auth.isLoggedIn) return;
   purchasePlansLoading.value = true;
   try {
     const res = await listPaymentPlans();
@@ -852,10 +848,6 @@ function openPurchaseEntry() {
     openAuthModal("login");
     return;
   }
-  if (!canShowPurchaseEntry.value) {
-    message.info("积分购买暂未开放");
-    return;
-  }
   if (!creditPurchasePlans.value.length) {
     void loadPaymentPlans();
   }
@@ -939,7 +931,7 @@ watch(
 watch(
   () => [auth.isLoggedIn, auth.user?.role] as const,
   ([loggedIn]) => {
-    if (!loggedIn || !canShowPurchaseEntry.value) {
+    if (!loggedIn) {
       creditPurchasePlans.value = [];
       selectedPurchasePlanKey.value = "";
       return;
@@ -1055,12 +1047,7 @@ watch(purchaseDialogOpen, (open) => {
         </a-menu>
 
         <div class="header-actions">
-          <a-button
-            v-if="auth.user?.role === 'admin' || auth.user?.role === 'superadmin'"
-            type="text"
-            class="top-link-btn"
-            @click="openPurchaseEntry"
-          >
+          <a-button type="text" class="top-link-btn" @click="openPurchaseEntry">
             购买积分
           </a-button>
           <a-button type="text" class="top-link-btn" @click="openRedeemEntry">
@@ -1221,12 +1208,7 @@ watch(purchaseDialogOpen, (open) => {
         <div class="mobile-drawer-section">
           <div class="mobile-drawer-section-title">积分服务</div>
           <div class="mobile-drawer-credit-actions">
-            <a-button
-              v-if="auth.user?.role === 'admin' || auth.user?.role === 'superadmin'"
-              block
-              class="mobile-drawer-action-btn"
-              @click="openPurchaseEntry"
-            >
+            <a-button block class="mobile-drawer-action-btn" @click="openPurchaseEntry">
               <template #icon><ThunderboltOutlined /></template>
               购买积分
             </a-button>
