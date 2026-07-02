@@ -846,6 +846,10 @@ function openPurchaseEntry() {
     openAuthModal("login");
     return;
   }
+  if (!isAdmin.value) {
+    message.info("积分购买暂未开放");
+    return;
+  }
   if (!creditPurchasePlans.value.length) {
     void loadPaymentPlans();
   }
@@ -1045,6 +1049,9 @@ watch(purchaseDialogOpen, (open) => {
         </a-menu>
 
         <div class="header-actions">
+          <a-button v-if="isAdmin" type="text" class="top-link-btn" @click="openPurchaseEntry">
+            购买积分
+          </a-button>
           <a-button type="text" class="top-link-btn" @click="openRedeemEntry">
             兑换积分
           </a-button>
@@ -1203,6 +1210,10 @@ watch(purchaseDialogOpen, (open) => {
         <div class="mobile-drawer-section">
           <div class="mobile-drawer-section-title">积分服务</div>
           <div class="mobile-drawer-credit-actions">
+            <a-button v-if="isAdmin" block class="mobile-drawer-action-btn" @click="openPurchaseEntry">
+              <template #icon><ThunderboltOutlined /></template>
+              购买积分
+            </a-button>
             <a-button block class="mobile-drawer-action-btn" @click="openRedeemEntry">
               <template #icon><GiftOutlined /></template>
               兑换积分

@@ -59,10 +59,10 @@ class AlipayTradeQueryResult:
 
 # 商品数值后续可直接在这里调整，前端只使用后端返回结果。
 PLAN_CATALOG: tuple[PaymentPlan, ...] = (
-    PaymentPlan(key="starter", title="体验包", amount_fen=180, credits=50, tag="尝鲜推荐"),
-    PaymentPlan(key="light", title="轻量体验包", amount_fen=1980, credits=300),
-    PaymentPlan(key="value", title="超值囤货包", amount_fen=6280, credits=1000, tag="最受欢迎"),
-    PaymentPlan(key="vip", title="至尊畅玩包", amount_fen=11800, credits=2000, tag="超值加量"),
+    PaymentPlan(key="starter", title="100积分包", amount_fen=750, credits=100, tag="入门推荐"),
+    PaymentPlan(key="light", title="500积分包", amount_fen=3650, credits=500),
+    PaymentPlan(key="value", title="1000积分包", amount_fen=6890, credits=1000, tag="热门选择"),
+    PaymentPlan(key="vip", title="2000积分包", amount_fen=12500, credits=2000, tag="超值加量"),
 )
 PLAN_CATALOG_MAP = {plan.key: plan for plan in PLAN_CATALOG}
 STARTER_PLAN_KEY = "starter"
@@ -207,18 +207,9 @@ def close_expired_unpaid_starter_orders(
 
 
 def list_payment_plans(db: Session, *, user: User) -> list[dict]:
-    purchased_starter = _has_successful_plan_purchase(db, user_id=user.id, plan_key=STARTER_PLAN_KEY)
-    active_starter_order = _has_active_plan_order(db, user_id=user.id, plan_key=STARTER_PLAN_KEY)
     serialized_plans: list[dict] = []
     for plan in PLAN_CATALOG:
         item = _serialize_payment_plan(plan)
-        if plan.key == STARTER_PLAN_KEY:
-            if purchased_starter:
-                item["purchasable"] = False
-                item["disabled_reason"] = "该套餐一个用户只能购买一次"
-            elif active_starter_order:
-                item["purchasable"] = False
-                item["disabled_reason"] = "该套餐已有订单处理中，请勿重复下单"
         serialized_plans.append(item)
     return serialized_plans
 
@@ -288,11 +279,6 @@ def create_payment_order(
             detail=f"支付宝支付配置不完整，缺少: {', '.join(missing_config_fields)}",
         )
     plan = get_payment_plan(plan_key)
-    if plan.key == STARTER_PLAN_KEY:
-        if _has_successful_plan_purchase(db, user_id=user.id, plan_key=plan.key):
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="新人专享套餐仅限购买一次")
-        if _has_active_plan_order(db, user_id=user.id, plan_key=plan.key):
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="新人专享套餐已有订单处理中，请勿重复下单")
     order_no = generate_order_no()
     order = PaymentOrder(
         order_no=order_no,
