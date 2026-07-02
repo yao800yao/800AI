@@ -69,6 +69,7 @@ const canShowPurchaseEntry = computed(() => {
   const role = String(auth.user?.role || "").trim();
   return role === "admin" || role === "superadmin";
 });
+const showRegisterPromoCode = false;
 const hideTopMenu = computed(() => route.meta.hideTopMenu === true);
 const mobileDrawerOpen = ref(false);
 const routeTransitionName = ref("route-page-forward");
@@ -608,9 +609,10 @@ async function handleRegisterSubmit() {
     message.warning("两次密码不一致");
     return;
   }
-  if (registerForm.promoCode.trim()) {
+  const promoCode = showRegisterPromoCode ? registerForm.promoCode.trim() : "";
+  if (promoCode) {
     try {
-      await validatePromoCode(registerForm.promoCode.trim());
+      await validatePromoCode(promoCode);
     } catch (err: any) {
       message.error(err.response?.data?.detail || err.message || "推广码无效");
       return;
@@ -631,13 +633,13 @@ async function handleRegisterSubmit() {
       registerForm.username.trim(),
       registerForm.email.trim(),
       registerForm.password,
-      registerForm.promoCode.trim() || undefined,
+      promoCode || undefined,
     );
     auth.setAuth(res.token, res.user);
     message.success("注册成功");
     notification.success({
       message: "赠送积分已到账",
-      description: registerForm.promoCode.trim()
+      description: promoCode
         ? "新用户注册赠送的 10 个试用积分和推广码额外奖励的 20 个积分已到账。"
         : "新用户注册赠送的 10 个试用积分已到账。",
       placement: "topRight",
@@ -1635,7 +1637,7 @@ watch(purchaseDialogOpen, (open) => {
                 @press-enter="handleRegisterSubmit"
               />
             </a-form-item>
-            <a-form-item label="邀请码（选填）">
+            <a-form-item v-if="showRegisterPromoCode" label="邀请码（选填）">
               <a-input
                 v-model:value="registerForm.promoCode"
                 size="large"
