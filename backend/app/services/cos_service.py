@@ -14,6 +14,7 @@ from app.models.api_key import ApiKey
 
 ALLOWED_IMAGE_TYPES = {"image/jpeg", "image/png", "image/webp", "image/gif", "image/heic", "image/heif"}
 MAX_UPLOAD_SIZE = 10 * 1024 * 1024  # 10 MB
+REFERENCE_MAX_UPLOAD_SIZE = 20 * 1024 * 1024  # 20 MB
 UPLOAD_PURPOSE_PREFIXES = {
     "ref": "ref",
     "source": "source",
@@ -29,6 +30,12 @@ PUT_OBJECT_ACTIONS = [
     "name/cos:UploadPart",
     "name/cos:CompleteMultipartUpload",
 ]
+
+
+def get_upload_size_limit(purpose: str) -> int:
+    if purpose == "ref":
+        return REFERENCE_MAX_UPLOAD_SIZE
+    return MAX_UPLOAD_SIZE
 
 
 @dataclass
@@ -133,8 +140,9 @@ def validate_upload_request(file_name: str, file_size: int, content_type: str, p
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="仅支持 JPG/PNG/WEBP/GIF/HEIC/HEIF 格式")
     if file_size <= 0:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="文件大小无效")
-    if file_size > MAX_UPLOAD_SIZE:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="文件大小不能超过 10 MB")
+    size_limit = get_upload_size_limit(purpose)
+    if file_size > size_limit:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"文件大小不能超过 {size_limit // (1024 * 1024)} MB")
     if not Path(file_name or "").name:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="文件名不能为空")
 

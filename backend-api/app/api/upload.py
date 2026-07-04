@@ -8,7 +8,7 @@ from app.models.user import User
 from app.config import settings
 from app.services.cos_service import (
     ALLOWED_IMAGE_TYPES,
-    MAX_UPLOAD_SIZE,
+    REFERENCE_MAX_UPLOAD_SIZE,
     create_upload_credential,
     normalize_upload_content_type,
 )
@@ -46,8 +46,8 @@ async def upload_image(
         raise HTTPException(status_code=400, detail="仅支持 JPG/PNG/WEBP/GIF/HEIC/HEIF 格式")
 
     data = await file.read()
-    if len(data) > MAX_UPLOAD_SIZE:
-        raise HTTPException(status_code=400, detail="文件大小不能超过 10 MB")
+    if len(data) > REFERENCE_MAX_UPLOAD_SIZE:
+        raise HTTPException(status_code=400, detail="文件大小不能超过 20 MB")
 
     ext = Path(file.filename or "img.jpg").suffix or ".jpg"
     filename = f"{uuid.uuid4().hex}{ext}"

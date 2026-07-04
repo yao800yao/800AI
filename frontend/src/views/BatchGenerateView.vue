@@ -101,7 +101,8 @@ const openPurchaseEntry = inject<() => void>("openPurchaseEntry");
 
 const MAX_BATCH_CARDS = 8;
 const DEFAULT_BATCH_CARDS = 3;
-const MAX_REFERENCE_FILE_SIZE = 10 * 1024 * 1024;
+const MAX_REFERENCE_FILE_SIZE = 20 * 1024 * 1024;
+const MAX_REFERENCE_FILE_SIZE_MB = MAX_REFERENCE_FILE_SIZE / (1024 * 1024);
 const POLL_INTERVAL_MS = 5000;
 const SUBMISSION_RETRY_DELAY_MS = 5200;
 const DEFAULT_IMAGE_SIZE_OPTIONS: SceneOptionItem[] = [
@@ -999,7 +1000,7 @@ async function uploadReferenceFilesToTarget(
     message.success(`成功上传 ${uploadedCount} 张参考图`);
   }
   if (oversizedCount > 0) {
-    message.warning(`${oversizedCount} 张图片超过 10MB，已跳过`);
+    message.warning(`${oversizedCount} 张图片超过 ${MAX_REFERENCE_FILE_SIZE_MB}MB，已跳过`);
   }
   if (failedCount > 0) {
     message.error(`${failedCount} 张参考图上传失败，请重试`);
