@@ -1,6 +1,8 @@
 import client from "./client";
 import type { ImageResult } from "@/types";
 
+const WEBP_PREVIEW_RULE = "imageMogr2/format/webp";
+
 export function regenerateImage(imageId: number): Promise<any> {
   return client.post(`/images/${imageId}/regenerate`);
 }
@@ -18,12 +20,26 @@ export function resolveImageUrl(imageUrl?: string): string {
   return `${base}${imageUrl.startsWith("/") ? imageUrl : `/${imageUrl}`}`;
 }
 
+export function resolvePreviewImageUrl(imageUrl?: string): string {
+  const resolvedUrl = resolveImageUrl(imageUrl);
+  if (!resolvedUrl || resolvedUrl.startsWith("data:") || resolvedUrl.startsWith("blob:")) {
+    return resolvedUrl;
+  }
+  if (resolvedUrl.includes(WEBP_PREVIEW_RULE)) {
+    return resolvedUrl;
+  }
+
+  const [urlWithoutHash, hash = ""] = resolvedUrl.split("#", 2);
+  const separator = urlWithoutHash.includes("?") ? "&" : "?";
+  return `${urlWithoutHash}${separator}${WEBP_PREVIEW_RULE}${hash ? `#${hash}` : ""}`;
+}
+
 export function getDisplayImageUrl(image?: Pick<ImageResult, "thumb_url" | "image_url" | "preview_url">): string {
-  return resolveImageUrl(image?.thumb_url || image?.image_url || image?.preview_url || "");
+  return resolvePreviewImageUrl(image?.thumb_url || image?.image_url || image?.preview_url || "");
 }
 
 export function getPreviewImageUrl(image?: Pick<ImageResult, "image_url" | "preview_url" | "thumb_url">): string {
-  return resolveImageUrl(image?.image_url || image?.preview_url || image?.thumb_url || "");
+  return resolvePreviewImageUrl(image?.image_url || image?.preview_url || image?.thumb_url || "");
 }
 
 function buildDownloadFilename(imageId: number, imageUrl: string): string {

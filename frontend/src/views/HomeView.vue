@@ -4,7 +4,7 @@ import { ArrowRightOutlined, CheckCircleFilled, FireOutlined, SafetyCertificateO
 import { useRouter } from "vue-router";
 import { getGenerationModels } from "@/api/config";
 import { getTemplateDetail, listTemplates } from "@/api/templates";
-import { resolveImageUrl } from "@/api/images";
+import { resolvePreviewImageUrl } from "@/api/images";
 import type { CreativeTemplate, GenerationModelOption } from "@/types";
 import TemplateDetailDialog from "@/components/templates/TemplateDetailDialog.vue";
 
@@ -117,7 +117,7 @@ onMounted(() => {
             @click="openDetail(item.id)"
           >
             <img
-              :src="resolveImageUrl(item.result_image_thumb || item.result_image)"
+              :src="resolvePreviewImageUrl(item.result_image_thumb || item.result_image)"
               :alt="item.prompt || '效果图'"
               loading="lazy"
             />

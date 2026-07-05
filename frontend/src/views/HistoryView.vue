@@ -19,7 +19,7 @@ import { useRouter } from "vue-router";
 import { getAdminHistoryCards, getCreditLogs as getAdminCreditLogs, listPaymentOrders, listUsers } from "@/api/admin";
 import { getGenerationModels, getTaskScenes } from "@/api/config";
 import { deleteHistoryTask, fetchHistory, toggleHistoryPin } from "@/api/history";
-import { getDisplayImageUrl, getDownloadUrl, getPreviewImageUrl, resolveImageUrl } from "@/api/images";
+import { getDisplayImageUrl, getDownloadUrl, getPreviewImageUrl, resolveImageUrl, resolvePreviewImageUrl } from "@/api/images";
 import { deletePromptHistory } from "@/api/auth";
 import FeedbackDialog from "@/components/feedback/FeedbackDialog.vue";
 import HistoryDetailDialog from "@/components/history/HistoryDetailDialog.vue";
@@ -402,7 +402,7 @@ function getHistoryCardMedia(item: UserHistoryCard) {
     return expiredResultAsset;
   }
   if (item.mode === "promptReverse") {
-    return resolveImageUrl(item.source_image_thumb || item.source_image);
+    return resolvePreviewImageUrl(item.source_image_thumb || item.source_image);
   }
   return getHistoryImageSrc(item);
 }
@@ -412,7 +412,7 @@ function getHistoryCardPreview(item: UserHistoryCard) {
     return "";
   }
   if (item.mode === "promptReverse") {
-    return resolveImageUrl(item.source_image);
+    return resolvePreviewImageUrl(item.source_image);
   }
   return getHistoryPreviewSrc(item);
 }

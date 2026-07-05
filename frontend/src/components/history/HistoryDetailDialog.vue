@@ -3,7 +3,7 @@ import { computed, h, ref } from "vue";
 import { message } from "ant-design-vue";
 import { CopyOutlined, DownloadOutlined, LoadingOutlined, PictureOutlined, ReloadOutlined } from "@ant-design/icons-vue";
 import dayjs from "dayjs";
-import { getDisplayImageUrl, getPreviewImageUrl, resolveImageUrl } from "@/api/images";
+import { getDisplayImageUrl, getPreviewImageUrl, resolveImageUrl, resolvePreviewImageUrl } from "@/api/images";
 import { withBaseUrl } from "@/lib/assets";
 import { getTaskImageFailureMessage } from "@/lib/generationErrors";
 import type { ImageResult, UserHistoryCard } from "@/types";
@@ -197,10 +197,10 @@ function handleDownload(item: UserHistoryCard) {
             <div v-if="item.mode === 'promptReverse' && item.source_image" class="detail-thumb-row">
               <div
                 class="detail-thumb detail-thumb-large"
-                @click="!isHistoryItemExpired(item) && openPreview(resolveImageUrl(item.source_image))"
+                @click="!isHistoryItemExpired(item) && openPreview(resolvePreviewImageUrl(item.source_image))"
               >
                 <img
-                  :src="isHistoryItemExpired(item) ? expiredResultAsset : resolveImageUrl(item.source_image_thumb || item.source_image)"
+                  :src="isHistoryItemExpired(item) ? expiredResultAsset : resolvePreviewImageUrl(item.source_image_thumb || item.source_image)"
                   alt="提示词反推原图"
                   loading="lazy"
                 />
@@ -260,9 +260,9 @@ function handleDownload(item: UserHistoryCard) {
           <div v-if="item.mode === 'inpaint' && item.source_image" class="detail-section">
             <div class="detail-label">局部重绘原图</div>
             <div class="detail-thumb-row">
-              <div class="detail-thumb" @click="!isHistoryItemExpired(item) && openPreview(resolveImageUrl(item.source_image))">
+              <div class="detail-thumb" @click="!isHistoryItemExpired(item) && openPreview(resolvePreviewImageUrl(item.source_image))">
                 <img
-                  :src="isHistoryItemExpired(item) ? expiredResultAsset : resolveImageUrl(item.source_image_thumb || item.source_image)"
+                  :src="isHistoryItemExpired(item) ? expiredResultAsset : resolvePreviewImageUrl(item.source_image_thumb || item.source_image)"
                   alt="局部重绘原图"
                   loading="lazy"
                 />
@@ -280,9 +280,9 @@ function handleDownload(item: UserHistoryCard) {
                 v-for="(ref, index) in item.reference_images"
                 :key="index"
                 class="detail-thumb"
-                @click="openPreview(resolveImageUrl(ref))"
+                @click="openPreview(resolvePreviewImageUrl(ref))"
               >
-                <img :src="resolveImageUrl(item.reference_image_thumbs[index] || ref)" alt="参考图" loading="lazy" />
+                <img :src="resolvePreviewImageUrl(item.reference_image_thumbs[index] || ref)" alt="参考图" loading="lazy" />
               </div>
             </div>
           </div>

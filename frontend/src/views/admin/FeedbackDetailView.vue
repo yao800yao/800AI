@@ -7,6 +7,7 @@ import dayjs from "dayjs";
 import FeedbackTaskResultGrid from "@/components/feedback/FeedbackTaskResultGrid.vue";
 import { getGenerationModels } from "@/api/config";
 import { getAdminFeedbackDetail, getAdminUnresolvedFeedbackCount, updateAdminFeedback } from "@/api/admin";
+import { resolvePreviewImageUrl } from "@/api/images";
 import { setStoredAdminUnresolvedFeedbackCount } from "@/lib/adminFeedbackNotice";
 import type { FeedbackDetail, FeedbackStatus, GenerationModelOption } from "@/types";
 
@@ -81,12 +82,12 @@ function getModelLabel(model?: string) {
 }
 
 function getReferenceThumbSrc(url: string, index: number) {
-  return taskReferenceThumbs.value[index] || url;
+  return resolvePreviewImageUrl(taskReferenceThumbs.value[index] || url);
 }
 
 function openPreview(url: string) {
   if (!url) return;
-  previewSrc.value = url;
+  previewSrc.value = resolvePreviewImageUrl(url);
   previewVisible.value = true;
 }
 

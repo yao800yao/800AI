@@ -31,7 +31,7 @@ import {
 import { getTaskScenes } from "@/api/config";
 import { deleteHistoryTask, fetchHistory } from "@/api/history";
 import { createTask, getTasks } from "@/api/tasks";
-import { deleteImage, getDisplayImageUrl, getDownloadUrl, getPreviewImageUrl, resolveImageUrl } from "@/api/images";
+import { deleteImage, getDisplayImageUrl, getDownloadUrl, getPreviewImageUrl, resolveImageUrl, resolvePreviewImageUrl } from "@/api/images";
 import { reversePrompt } from "@/api/promptReverse";
 import { uploadReferenceImage } from "@/api/upload";
 import { getMe, getPromptHistory, deletePromptHistory } from "@/api/auth";
@@ -2783,7 +2783,7 @@ watch(() => auth.isLoggedIn, (isLoggedIn) => {
             @click="useHistoryPrompt(item.prompt)"
           >
             <div v-if="item.source_image" class="history-thumb">
-              <img :src="resolveImageUrl(item.source_image)" alt="历史图片" />
+              <img :src="resolvePreviewImageUrl(item.source_image)" alt="历史图片" />
             </div>
             <div class="history-content">
               <div class="history-meta">
