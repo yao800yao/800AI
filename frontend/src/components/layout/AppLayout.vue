@@ -137,7 +137,6 @@ const adminMenuItems = computed(() =>
     { key: "/admin/error-analytics", label: "错误统计", icon: BugOutlined, superAdminOnly: false },
     { key: "/admin/general-settings", label: "通用设置", icon: SettingOutlined, superAdminOnly: false },
     { key: "/admin/redeem-keys", label: "兑换码", icon: GiftOutlined, superAdminOnly: false },
-    { key: "/admin/revenue", label: "营业额", icon: AccountBookOutlined, superAdminOnly: false },
     { key: "/admin/payment-orders", label: "购买订单", icon: AccountBookOutlined, superAdminOnly: false },
     { key: "/admin/feedbacks", label: "用户反馈", icon: MessageOutlined, superAdminOnly: false },
     { key: "/admin/system-messages", label: "系统邮件", icon: MailOutlined, superAdminOnly: false },
@@ -156,7 +155,7 @@ const adminMenuBaseItems = computed(() =>
   ].includes(item.key))
 );
 const adminMenuBusinessItems = computed(() =>
-  adminMenuItems.value.filter((item) => ["/admin/redeem-keys", "/admin/revenue", "/admin/payment-orders"].includes(item.key))
+  adminMenuItems.value.filter((item) => ["/admin/redeem-keys", "/admin/payment-orders"].includes(item.key))
 );
 const adminMenuNoticeItems = computed(() =>
   adminMenuItems.value.filter((item) => ["/admin/feedbacks", "/admin/system-messages"].includes(item.key))
@@ -633,14 +632,14 @@ async function handleRegisterSubmit() {
     );
     auth.setAuth(res.token, res.user);
     message.success("注册成功");
-    notification.success({
-      message: "赠送积分已到账",
-      description: promoCode
-        ? "新用户注册赠送的 10 个试用积分和推广码额外奖励的 20 个积分已到账。"
-        : "新用户注册赠送的 10 个试用积分已到账。",
-      placement: "topRight",
-      duration: 6,
-    });
+    if (promoCode) {
+      notification.success({
+        message: "赠送积分已到账",
+        description: "使用推广码注册额外奖励的 20 个积分已到账。",
+        placement: "topRight",
+        duration: 6,
+      });
+    }
     loginModalVisible.value = false;
     resetAuthForms();
     await nextTick();

@@ -13,7 +13,6 @@ from app.utils.security import create_access_token, hash_password, verify_passwo
 
 EMAIL_REGEX = re.compile(r"^[^\s@]+@[^\s@]+\.[^\s@]+$")
 CLOUDBASE_AUTH_PATH = "/auth"
-NEW_USER_TRIAL_CREDITS = 10
 
 
 def _normalize_email(email: str) -> str:
@@ -66,13 +65,6 @@ def register_user(
     )
     db.add(user)
     db.flush()
-    change_user_credit_balance(
-        db,
-        user.id,
-        delta=NEW_USER_TRIAL_CREDITS,
-        log_type="allocate",
-        description="新用户注册试用积分",
-    )
     if promo:
         change_user_credit_balance(
             db,
