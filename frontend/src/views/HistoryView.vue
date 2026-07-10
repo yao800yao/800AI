@@ -15,12 +15,13 @@ import {
   PushpinOutlined,
   ReloadOutlined,
 } from "@ant-design/icons-vue";
-import { useRouter } from "vue-router";
-import { getAdminHistoryCards, getCreditLogs as getAdminCreditLogs, listPaymentOrders, listUsers } from "@/api/admin";
+import { useRoute, useRouter } from "vue-router";
+import { getAdminHistoryCards, listUsers } from "@/api/admin";
 import { getGenerationModels, getTaskScenes } from "@/api/config";
 import { deleteHistoryTask, fetchHistory, toggleHistoryPin } from "@/api/history";
 import { getDisplayImageUrl, getDownloadUrl, getPreviewImageUrl, resolveImageUrl, resolvePreviewImageUrl } from "@/api/images";
 import { deletePromptHistory } from "@/api/auth";
+import AdminUserInfoDialog from "@/components/admin/AdminUserInfoDialog.vue";
 import FeedbackDialog from "@/components/feedback/FeedbackDialog.vue";
 import HistoryDetailDialog from "@/components/history/HistoryDetailDialog.vue";
 import TemplateEditorDialog from "@/components/templates/TemplateEditorDialog.vue";
@@ -31,13 +32,14 @@ import {
   readStoredGridColumnCount,
   writeStoredGridColumnCount,
 } from "@/lib/gridColumnPreference";
-import type { AdminPaymentOrder, AdminUser, CreditLog, GenerationModelOption, TaskSceneConfig, TaskSource, TaskType, UserHistoryCard } from "@/types";
+import type { AdminUser, GenerationModelOption, TaskSceneConfig, TaskSource, TaskType, UserHistoryCard } from "@/types";
 
 const props = withDefaults(defineProps<{
   adminUserTasks?: boolean;
 }>(), {
   adminUserTasks: false,
 });
+const route = useRoute();
 const router = useRouter();
 const auth = useAuthStore();
 const items = ref<UserHistoryCard[]>([]);
@@ -60,7 +62,9 @@ const typeFilter = ref<TaskType | undefined>(undefined);
 const sourceFilter = ref<TaskSource | undefined>(undefined);
 const modelFilter = ref<string | undefined>(undefined);
 const statusFilter = ref<"pending" | "processing" | "success" | "failed" | undefined>(undefined);
-const userFilter = ref<string | undefined>(undefined);
+const userFilter = ref<string | undefined>(
+  typeof route.query.user === "string" ? route.query.user : undefined,
+);
 const promptFilter = ref("");
 const dateRangeFilter = ref<[dayjs.Dayjs, dayjs.Dayjs] | null>(null);
 const users = ref<AdminUser[]>([]);
@@ -106,12 +110,7 @@ const pinningKeys = ref<string[]>([]);
 const templateDialogRef = ref<InstanceType<typeof TemplateEditorDialog> | null>(null);
 const isAdminHistoryView = computed(() => props.adminUserTasks && auth.isAdmin);
 const userInfoDialogOpen = ref(false);
-const userInfoLoading = ref(false);
 const selectedUserInfo = ref<AdminUser | null>(null);
-const selectedUserRedeemLogs = ref<CreditLog[]>([]);
-const selectedUserRedeemTotal = ref(0);
-const selectedUserPurchaseOrders = ref<AdminPaymentOrder[]>([]);
-const selectedUserPurchaseTotal = ref(0);
 
 const modelOptions = computed(() => {
   const optionMap = new Map<string, string>();
@@ -431,7 +430,7 @@ function findAdminUser(userId?: string) {
   return users.value.find((user) => user.id === userId) || null;
 }
 
-async function openUserInfoDialog(item: UserHistoryCard) {
+function openUserInfoDialog(item: UserHistoryCard) {
   if (!isAdminHistoryView.value || !item.user_id) return;
   const matchedUser = findAdminUser(item.user_id);
   selectedUserInfo.value = matchedUser || {
@@ -445,31 +444,11 @@ async function openUserInfoDialog(item: UserHistoryCard) {
     consumed_credits: 0,
     created_at: "",
   };
-  selectedUserRedeemLogs.value = [];
-  selectedUserRedeemTotal.value = 0;
-  selectedUserPurchaseOrders.value = [];
-  selectedUserPurchaseTotal.value = 0;
   userInfoDialogOpen.value = true;
-  userInfoLoading.value = true;
-  try {
-    const [redeemRes, purchaseRes] = await Promise.all([
-      getAdminCreditLogs(1, 5, item.user_id, undefined, undefined, undefined, "redeem"),
-      listPaymentOrders({ page: 1, page_size: 5, user: item.user_id, status: "credited" }),
-    ]);
-    selectedUserRedeemLogs.value = redeemRes.items;
-    selectedUserRedeemTotal.value = redeemRes.total;
-    selectedUserPurchaseOrders.value = purchaseRes.items;
-    selectedUserPurchaseTotal.value = purchaseRes.total;
-  } catch {
-    message.error("获取用户积分记录失败");
-  } finally {
-    userInfoLoading.value = false;
-  }
 }
 
-function filterBySelectedUser() {
-  if (!selectedUserInfo.value?.id) return;
-  userFilter.value = selectedUserInfo.value.id;
+function handleViewUserData(user: AdminUser) {
+  userFilter.value = user.id;
   page.value = 1;
   userInfoDialogOpen.value = false;
   void loadHistory(true);
@@ -1190,83 +1169,11 @@ function handleEditImage(item: UserHistoryCard) {
     />
     <TemplateEditorDialog ref="templateDialogRef" />
 
-    <a-modal
+    <AdminUserInfoDialog
       v-model:open="userInfoDialogOpen"
-      :title="selectedUserInfo ? `用户信息 — ${selectedUserInfo.username}` : '用户信息'"
-      :footer="null"
-      :width="560"
-      centered
-    >
-      <a-spin :spinning="userInfoLoading">
-        <div v-if="selectedUserInfo" class="user-info-dialog">
-          <div class="user-info-header">
-            <a-avatar :size="54" :src="selectedUserInfo.avatar_url || undefined" class="user-info-avatar">
-              {{ selectedUserInfo.username?.charAt(0)?.toUpperCase() }}
-            </a-avatar>
-            <div class="user-info-identity">
-              <div class="user-info-name">{{ selectedUserInfo.username }}</div>
-              <div class="user-info-id">{{ selectedUserInfo.id }}</div>
-            </div>
-          </div>
-
-          <div class="user-info-stats">
-            <div class="user-info-stat-card">
-              <span>已使用积分</span>
-              <strong>{{ selectedUserInfo.consumed_credits || 0 }}</strong>
-            </div>
-            <div class="user-info-stat-card">
-              <span>剩余积分</span>
-              <strong>{{ selectedUserInfo.credits || 0 }}</strong>
-            </div>
-            <div class="user-info-stat-card">
-              <span>兑换记录</span>
-              <strong>{{ selectedUserRedeemTotal }}</strong>
-            </div>
-            <div class="user-info-stat-card">
-              <span>购买记录</span>
-              <strong>{{ selectedUserPurchaseTotal }}</strong>
-            </div>
-          </div>
-
-          <div class="user-info-section">
-            <div class="user-info-section-title">最近在线购买记录</div>
-            <div v-if="selectedUserPurchaseOrders.length" class="user-redeem-list">
-              <div v-for="order in selectedUserPurchaseOrders" :key="order.order_no" class="user-redeem-item">
-                <div>
-                  <strong>+{{ order.credits }} 积分</strong>
-                  <span>{{ order.subject || "积分购买" }} · ¥{{ order.amount_yuan.toFixed(2) }}</span>
-                </div>
-                <small>{{ formatTime(order.credited_at || order.paid_at || order.created_at) }}</small>
-              </div>
-            </div>
-            <a-empty v-else description="暂无在线购买记录" />
-          </div>
-
-          <div class="user-info-section">
-            <div class="user-info-section-title">最近积分兑换记录</div>
-            <div v-if="selectedUserRedeemLogs.length" class="user-redeem-list">
-              <div v-for="log in selectedUserRedeemLogs" :key="log.id" class="user-redeem-item">
-                <div>
-                  <strong>{{ log.amount > 0 ? `+${log.amount}` : log.amount }} 积分</strong>
-                  <span>{{ log.description || "兑换积分" }}</span>
-                </div>
-                <small>{{ formatTime(log.created_at) }}</small>
-              </div>
-            </div>
-            <a-empty v-else description="暂无积分兑换记录" />
-          </div>
-
-          <div class="user-info-actions">
-            <a-button class="history-filter-btn history-filter-btn-secondary" @click="userInfoDialogOpen = false">
-              关闭
-            </a-button>
-            <a-button type="primary" class="history-filter-btn history-filter-btn-primary" @click="filterBySelectedUser">
-              查看数据
-            </a-button>
-          </div>
-        </div>
-      </a-spin>
-    </a-modal>
+      :user="selectedUserInfo"
+      @view-data="handleViewUserData"
+    />
   </div>
 </template>
 
@@ -1743,124 +1650,6 @@ function handleEditImage(item: UserHistoryCard) {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.user-info-dialog {
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-}
-
-.user-info-header {
-  display: flex;
-  align-items: center;
-  gap: 14px;
-  padding: 14px;
-  border: 1px solid var(--theme-panel-border);
-  border-radius: 18px;
-  background: var(--theme-panel-bg-soft);
-}
-
-.user-info-avatar {
-  flex: 0 0 auto;
-  background: var(--theme-accent);
-  color: var(--theme-accent-contrast);
-}
-
-.user-info-identity {
-  min-width: 0;
-}
-
-.user-info-name {
-  color: var(--theme-title);
-  font-size: 17px;
-  font-weight: 800;
-}
-
-.user-info-id {
-  margin-top: 4px;
-  color: var(--theme-text-secondary);
-  font-size: 12px;
-  word-break: break-all;
-}
-
-.user-info-stats {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 10px;
-}
-
-.user-info-stat-card {
-  padding: 12px;
-  border: 1px solid var(--theme-panel-border);
-  border-radius: 16px;
-  background: var(--theme-panel-bg);
-
-  span {
-    display: block;
-    color: var(--theme-text-secondary);
-    font-size: 12px;
-  }
-
-  strong {
-    display: block;
-    margin-top: 6px;
-    color: var(--theme-title);
-    font-size: 20px;
-  }
-}
-
-.user-info-section-title {
-  margin-bottom: 10px;
-  color: var(--theme-title);
-  font-weight: 800;
-}
-
-.user-redeem-list {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.user-redeem-item {
-  display: flex;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 10px 12px;
-  border: 1px solid var(--theme-panel-border);
-  border-radius: 14px;
-  background: var(--theme-panel-bg-soft);
-
-  div {
-    min-width: 0;
-  }
-
-  strong {
-    display: block;
-    color: #1f9d63;
-    font-size: 13px;
-  }
-
-  span {
-    display: block;
-    margin-top: 3px;
-    color: var(--theme-title);
-    font-size: 12px;
-    word-break: break-word;
-  }
-
-  small {
-    flex: 0 0 auto;
-    color: var(--theme-text-secondary);
-    font-size: 12px;
-    white-space: nowrap;
-  }
-}
-
-.user-info-actions {
-  display: flex;
-  justify-content: flex-end;
-  gap: 10px;
 }
 
 html:is([data-theme="dark"], [data-theme="midnight"]) .history-page .result-card-user {

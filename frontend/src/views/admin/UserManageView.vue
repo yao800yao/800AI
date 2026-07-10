@@ -1,7 +1,9 @@
 <script setup lang="ts">
 import { ref, onMounted, reactive, computed, watch } from "vue";
+import { useRouter } from "vue-router";
 import { message, Modal } from "ant-design-vue";
 import { CopyOutlined, PlusOutlined, TeamOutlined, WalletOutlined, SearchOutlined, UndoOutlined } from "@ant-design/icons-vue";
+import AdminUserInfoDialog from "@/components/admin/AdminUserInfoDialog.vue";
 import {
   listUsers,
   createUser,
@@ -17,6 +19,7 @@ import { useAuthStore } from "@/stores/auth";
 import type { AdminUser, AdminUserPromoDashboard } from "@/types";
 
 const auth = useAuthStore();
+const router = useRouter();
 const isSuperAdmin = computed(() => auth.isSuperAdmin);
 
 const users = ref<AdminUser[]>([]);
@@ -46,6 +49,8 @@ const whitelistLoadingId = ref<string | null>(null);
 const promoDashboardOpen = ref(false);
 const promoDashboardLoading = ref(false);
 const promoDashboard = ref<AdminUserPromoDashboard | null>(null);
+const userInfoDialogOpen = ref(false);
+const userInfoTarget = ref<AdminUser | null>(null);
 const currentPage = ref(1);
 const pageSize = 30;
 
@@ -257,6 +262,16 @@ async function handleToggleWhitelist(user: AdminUser) {
   }
 }
 
+function openUserInfoDialog(user: AdminUser) {
+  userInfoTarget.value = user;
+  userInfoDialogOpen.value = true;
+}
+
+function handleViewUserData(user: AdminUser) {
+  userInfoDialogOpen.value = false;
+  router.push({ path: "/admin/user-tasks", query: { user: user.id } });
+}
+
 async function openPromoDashboard(user: AdminUser) {
   promoDashboardOpen.value = true;
   promoDashboardLoading.value = true;
@@ -406,7 +421,12 @@ function promoActivityRowKey(record: {
           </template>
           <template v-if="column.dataIndex === 'username'">
             <div class="user-cell">
-              <a-avatar :size="34" :src="record.avatar_url || undefined" class="table-avatar">
+              <a-avatar
+                :size="34"
+                :src="record.avatar_url || undefined"
+                class="table-avatar table-avatar-clickable"
+                @click.stop="openUserInfoDialog(record)"
+              >
                 {{ record.username?.charAt(0)?.toUpperCase() }}
               </a-avatar>
               <div class="user-cell-meta">
@@ -739,6 +759,12 @@ function promoActivityRowKey(record: {
         </div>
       </a-spin>
     </a-modal>
+
+    <AdminUserInfoDialog
+      v-model:open="userInfoDialogOpen"
+      :user="userInfoTarget"
+      @view-data="handleViewUserData"
+    />
   </div>
 </template>
 
@@ -815,6 +841,16 @@ function promoActivityRowKey(record: {
   background: linear-gradient(180deg, #ffd06d, #ffb02b);
   color: #5a3c14;
   font-weight: 700;
+}
+
+.table-avatar-clickable {
+  cursor: pointer;
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+
+  &:hover {
+    transform: scale(1.04);
+    box-shadow: 0 4px 12px rgba(178, 108, 4, 0.2);
+  }
 }
 
 .user-cell-name {
