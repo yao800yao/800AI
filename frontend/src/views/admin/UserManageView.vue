@@ -4,6 +4,7 @@ import { useRouter } from "vue-router";
 import { message, Modal } from "ant-design-vue";
 import { CopyOutlined, PlusOutlined, TeamOutlined, WalletOutlined, SearchOutlined, UndoOutlined } from "@ant-design/icons-vue";
 import AdminUserInfoDialog from "@/components/admin/AdminUserInfoDialog.vue";
+import AdminUserCreditLogsDialog from "@/components/admin/AdminUserCreditLogsDialog.vue";
 import {
   listUsers,
   createUser,
@@ -51,6 +52,8 @@ const promoDashboardLoading = ref(false);
 const promoDashboard = ref<AdminUserPromoDashboard | null>(null);
 const userInfoDialogOpen = ref(false);
 const userInfoTarget = ref<AdminUser | null>(null);
+const creditLogsDialogOpen = ref(false);
+const creditLogsTarget = ref<AdminUser | null>(null);
 const currentPage = ref(1);
 const pageSize = 30;
 
@@ -62,7 +65,7 @@ const columns = [
   { title: "已消耗积分", dataIndex: "consumed_credits", width: 108 },
   { title: "状态", dataIndex: "status", width: 82 },
   { title: "创建时间", dataIndex: "created_at", width: 154 },
-  { title: "操作", key: "action", width: 340 },
+  { title: "操作", key: "action", width: 400 },
 ];
 
 const filteredUsers = computed(() => {
@@ -267,6 +270,11 @@ function openUserInfoDialog(user: AdminUser) {
   userInfoDialogOpen.value = true;
 }
 
+function openCreditLogsDialog(user: AdminUser) {
+  creditLogsTarget.value = user;
+  creditLogsDialogOpen.value = true;
+}
+
 function handleViewUserData(user: AdminUser) {
   userInfoDialogOpen.value = false;
   router.push({ path: "/admin/user-tasks", query: { user: user.id } });
@@ -405,7 +413,7 @@ function promoActivityRowKey(record: {
         :loading="loading"
         row-key="id"
         :pagination="false"
-        :scroll="{ x: 1280 }"
+        :scroll="{ x: 1340 }"
         class="admin-mobile-table"
       >
         <template #bodyCell="{ column, record }">
@@ -458,6 +466,14 @@ function promoActivityRowKey(record: {
               <a-button type="link" size="small" class="user-action-btn user-action-btn-primary" @click="openCredits(record)">
                 <template #icon><WalletOutlined /></template>
                 分配积分
+              </a-button>
+              <a-button
+                type="link"
+                size="small"
+                class="user-action-btn user-action-btn-secondary"
+                @click="openCreditLogsDialog(record)"
+              >
+                积分明细
               </a-button>
               <a-button
                 v-if="record.is_whitelisted"
@@ -765,6 +781,11 @@ function promoActivityRowKey(record: {
       :user="userInfoTarget"
       @view-data="handleViewUserData"
     />
+
+    <AdminUserCreditLogsDialog
+      v-model:open="creditLogsDialogOpen"
+      :user="creditLogsTarget"
+    />
   </div>
 </template>
 
@@ -891,7 +912,7 @@ function promoActivityRowKey(record: {
   flex-wrap: nowrap;
   align-items: center;
   gap: 4px;
-  max-width: 340px;
+  max-width: 400px;
   white-space: nowrap;
 }
 
