@@ -168,6 +168,48 @@ export interface UserHistoryResponse {
   items: UserHistoryCard[];
 }
 
+export interface UserAssetCategory {
+  id: number;
+  name: string;
+  sort_order: number;
+  asset_count: number;
+  preview_urls: string[];
+  updated_at?: string | null;
+}
+
+export interface UserAssetCategoryListResponse {
+  items: UserAssetCategory[];
+  uncategorized_count: number;
+}
+
+export interface UserAssetQuota {
+  used: number;
+  limit: number;
+  remaining: number;
+}
+
+export interface UserAsset {
+  id: number;
+  category_id?: number | null;
+  category_name: string;
+  file_name: string;
+  image_url: string;
+  thumb_url: string;
+  mime_type: string;
+  file_size: number;
+  width?: number | null;
+  height?: number | null;
+  status: string;
+  created_at?: string | null;
+  completed_at?: string | null;
+}
+
+export interface UserAssetListResponse {
+  items: UserAsset[];
+  total: number;
+  quota: UserAssetQuota;
+}
+
 export interface HistoryPinTogglePayload {
   item_type: "task" | "prompt_history";
   image_id?: number | null;
@@ -814,4 +856,15 @@ export interface UploadCredential {
   session_token: string;
   start_time?: number | null;
   expired_time: number;
+}
+
+export interface UserAssetUploadSessionResponse {
+  asset: UserAsset;
+  quota: UserAssetQuota;
+  credential: UploadCredential;
+}
+
+export interface UserAssetImportResponse {
+  asset: UserAsset;
+  quota: UserAssetQuota;
 }

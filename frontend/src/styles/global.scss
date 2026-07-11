@@ -388,6 +388,18 @@ html, body, #app {
   box-shadow: 0 14px 24px var(--theme-shadow-strong) !important;
 }
 
+// Library pickers manage their own internal scroll on desktop.
+.asset-library-modal-wrap .ant-modal-body {
+  overflow: visible;
+}
+
+@media (max-width: 960px) {
+  .asset-library-modal-wrap .ant-modal-body {
+    overflow-x: hidden;
+    overflow-y: auto;
+  }
+}
+
 .ant-table-wrapper {
   .ant-table {
     border-radius: 0;

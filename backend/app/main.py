@@ -106,6 +106,7 @@ def on_startup():
     _ensure_feedback_schema()
     _ensure_system_message_schema()
     _ensure_history_pin_schema()
+    _ensure_user_asset_schema()
     if settings.should_run_schema_compat:
         _ensure_schema_compat()
     _backfill_task_credit_costs()
@@ -1395,6 +1396,100 @@ def _ensure_history_pin_schema():
             conn.execute(text("CREATE UNIQUE INDEX ux_history_pins_user_item_key ON history_pins (user_id, item_key)"))
 
 
+
+def _ensure_user_asset_schema():
+    inspector = inspect(engine)
+    table_names = set(inspector.get_table_names())
+    if "users" not in table_names:
+        return
+
+    if "user_asset_categories" not in table_names:
+        from app.models.user_asset_category import UserAssetCategory
+
+        UserAssetCategory.__table__.create(bind=engine)
+        inspector = inspect(engine)
+        table_names = set(inspector.get_table_names())
+
+    if "user_assets" not in table_names:
+        from app.models.user_asset import UserAsset
+
+        UserAsset.__table__.create(bind=engine)
+        inspector = inspect(engine)
+
+    category_columns = {col["name"] for col in inspector.get_columns("user_asset_categories")}
+    asset_columns = {col["name"] for col in inspector.get_columns("user_assets")}
+
+    with engine.begin() as conn:
+        if "name" not in category_columns:
+            conn.execute(text("ALTER TABLE user_asset_categories ADD COLUMN name VARCHAR(100) NOT NULL DEFAULT ''"))
+        if "sort_order" not in category_columns:
+            conn.execute(text("ALTER TABLE user_asset_categories ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0"))
+        if "created_at" not in category_columns:
+            conn.execute(text("ALTER TABLE user_asset_categories ADD COLUMN created_at DATETIME DEFAULT CURRENT_TIMESTAMP"))
+        if "updated_at" not in category_columns:
+            conn.execute(text("ALTER TABLE user_asset_categories ADD COLUMN updated_at DATETIME DEFAULT CURRENT_TIMESTAMP"))
+
+        if "file_name" not in asset_columns:
+            conn.execute(text("ALTER TABLE user_assets ADD COLUMN file_name VARCHAR(255) NOT NULL DEFAULT ''"))
+        if "object_key" not in asset_columns:
+            conn.execute(text("ALTER TABLE user_assets ADD COLUMN object_key VARCHAR(500) NOT NULL DEFAULT ''"))
+        if "url" not in asset_columns:
+            conn.execute(text("ALTER TABLE user_assets ADD COLUMN url VARCHAR(1000) NOT NULL DEFAULT ''"))
+        if "thumbnail_url" not in asset_columns:
+            conn.execute(text("ALTER TABLE user_assets ADD COLUMN thumbnail_url VARCHAR(1000) NOT NULL DEFAULT ''"))
+        if "mime_type" not in asset_columns:
+            conn.execute(text("ALTER TABLE user_assets ADD COLUMN mime_type VARCHAR(100) NOT NULL DEFAULT ''"))
+        if "file_size" not in asset_columns:
+            conn.execute(text("ALTER TABLE user_assets ADD COLUMN file_size INTEGER NOT NULL DEFAULT 0"))
+        if "width" not in asset_columns:
+            conn.execute(text("ALTER TABLE user_assets ADD COLUMN width INTEGER NULL"))
+        if "height" not in asset_columns:
+            conn.execute(text("ALTER TABLE user_assets ADD COLUMN height INTEGER NULL"))
+        if "status" not in asset_columns:
+            conn.execute(text("ALTER TABLE user_assets ADD COLUMN status VARCHAR(20) NOT NULL DEFAULT 'pending'"))
+        if "is_deleted" not in asset_columns:
+            conn.execute(text("ALTER TABLE user_assets ADD COLUMN is_deleted BOOLEAN DEFAULT 0"))
+        if "deleted_at" not in asset_columns:
+            conn.execute(text("ALTER TABLE user_assets ADD COLUMN deleted_at DATETIME"))
+        if "completed_at" not in asset_columns:
+            conn.execute(text("ALTER TABLE user_assets ADD COLUMN completed_at DATETIME"))
+        if "created_at" not in asset_columns:
+            conn.execute(text("ALTER TABLE user_assets ADD COLUMN created_at DATETIME DEFAULT CURRENT_TIMESTAMP"))
+        if "updated_at" not in asset_columns:
+            conn.execute(text("ALTER TABLE user_assets ADD COLUMN updated_at DATETIME DEFAULT CURRENT_TIMESTAMP"))
+
+        conn.execute(text("UPDATE user_assets SET file_name = '' WHERE file_name IS NULL"))
+        conn.execute(text("UPDATE user_assets SET object_key = '' WHERE object_key IS NULL"))
+        conn.execute(text("UPDATE user_assets SET url = '' WHERE url IS NULL"))
+        conn.execute(text("UPDATE user_assets SET thumbnail_url = '' WHERE thumbnail_url IS NULL"))
+        conn.execute(text("UPDATE user_assets SET mime_type = '' WHERE mime_type IS NULL"))
+        conn.execute(text("UPDATE user_assets SET file_size = 0 WHERE file_size IS NULL"))
+        conn.execute(text("UPDATE user_assets SET status = 'pending' WHERE status IS NULL OR status = ''"))
+        conn.execute(text("UPDATE user_assets SET is_deleted = 0 WHERE is_deleted IS NULL"))
+
+    refreshed_inspector = inspect(engine)
+    refreshed_category_indexes = {index["name"] for index in refreshed_inspector.get_indexes("user_asset_categories")}
+    refreshed_category_unique_constraints = {
+        constraint["name"]
+        for constraint in refreshed_inspector.get_unique_constraints("user_asset_categories")
+        if constraint.get("name")
+    }
+    refreshed_asset_indexes = {index["name"] for index in refreshed_inspector.get_indexes("user_assets")}
+
+    with engine.begin() as conn:
+        if "idx_user_asset_categories_user_sort_order" not in refreshed_category_indexes:
+            conn.execute(text("CREATE INDEX idx_user_asset_categories_user_sort_order ON user_asset_categories (user_id, sort_order, updated_at)"))
+        if "uq_user_asset_categories_user_name" not in refreshed_category_unique_constraints:
+            conn.execute(text("CREATE UNIQUE INDEX uq_user_asset_categories_user_name ON user_asset_categories (user_id, name)"))
+        if "idx_user_assets_user_created" not in refreshed_asset_indexes:
+            conn.execute(text("CREATE INDEX idx_user_assets_user_created ON user_assets (user_id, created_at)"))
+        if "idx_user_assets_category_id" not in refreshed_asset_indexes:
+            conn.execute(text("CREATE INDEX idx_user_assets_category_id ON user_assets (category_id)"))
+        if "idx_user_assets_user_deleted_status" not in refreshed_asset_indexes:
+            conn.execute(text("CREATE INDEX idx_user_assets_user_deleted_status ON user_assets (user_id, is_deleted, status, completed_at)"))
+
+
+
 def _backfill_task_credit_costs():
     from app.database import SessionLocal
     from app.models.task import Task
@@ -1504,10 +1599,12 @@ upload_path = Path(settings.UPLOAD_DIR)
 upload_path.mkdir(parents=True, exist_ok=True)
 app.mount("/uploads", StaticFiles(directory=str(upload_path)), name="uploads")
 
-from app.api import auth, tasks, images, history, admin, upload, api_key, templates, prompt_reverse, external_api_config, feedback, system_messages, user_api_keys, payment  # noqa: E402
+from app.api import auth, tasks, images, history, admin, upload, api_key, templates, prompt_reverse, external_api_config, feedback, system_messages, user_api_keys, payment, user_assets  # noqa: E402
 app.include_router(auth.router)
 app.include_router(user_api_keys.router)
 app.include_router(templates.router)
+app.include_router(user_assets.category_router)
+app.include_router(user_assets.router)
 app.include_router(tasks.router)
 app.include_router(images.router)
 app.include_router(history.router)

@@ -1,3 +1,5 @@
+from datetime import timedelta
+
 from celery import Celery
 from celery.schedules import crontab
 from app.config import settings
@@ -23,6 +25,10 @@ celery_app.conf.update(
         "send-daily-wecom-report": {
             "task": "app.workers.reporting.send_daily_wecom_report",
             "schedule": crontab(minute=0, hour=0),
+        },
+        "cleanup-stale-pending-user-assets": {
+            "task": "app.workers.user_assets.cleanup_stale_pending_user_assets",
+            "schedule": timedelta(minutes=max(int(settings.USER_ASSET_PENDING_CLEANUP_INTERVAL_MINUTES or 0), 1)),
         }
     },
 )

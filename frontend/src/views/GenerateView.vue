@@ -33,6 +33,7 @@ import { deleteHistoryTask, fetchHistory } from "@/api/history";
 import { createTask, getTasks } from "@/api/tasks";
 import { deleteImage, getDisplayImageUrl, getDownloadUrl, getPreviewImageUrl, resolveImageUrl, resolvePreviewImageUrl } from "@/api/images";
 import { reversePrompt } from "@/api/promptReverse";
+import { getUserAssetStats, uploadUserAssetFile } from "@/api/userAssets";
 import { uploadReferenceImage } from "@/api/upload";
 import { getMe, getPromptHistory, deletePromptHistory } from "@/api/auth";
 import { getMyCompletedUnreadFeedbackCount } from "@/api/feedback";
@@ -41,9 +42,15 @@ import RepaintCanvas from "@/components/generate/RepaintCanvas.vue";
 import AspectRatioPicker from "@/components/generate/AspectRatioPicker.vue";
 import OptionGridPicker from "@/components/generate/OptionGridPicker.vue";
 import PromptInterceptionTip from "@/components/generate/PromptInterceptionTip.vue";
+import UserAssetPicker from "@/components/assets/UserAssetPicker.vue";
 import FeedbackDialog from "@/components/feedback/FeedbackDialog.vue";
 import TemplateEditorDialog from "@/components/templates/TemplateEditorDialog.vue";
 import { withBaseUrl } from "@/lib/assets";
+import {
+  getAssetQuotaFullMessage,
+  getAssetQuotaTruncatedMessage,
+  resolveAssetQuotaErrorMessage,
+} from "@/lib/userAssetQuota";
 import {
   formatGenerationErrorMessage,
   formatGenerationTaskFailureMessage,
@@ -55,7 +62,7 @@ import {
   readStoredGridColumnCount,
   writeStoredGridColumnCount,
 } from "@/lib/gridColumnPreference";
-import type { GenerationModelOption, ImageResult, PromptHistoryItem, SceneOptionItem, TaskResult, TaskSceneConfig, UserHistoryCard } from "@/types";
+import type { GenerationModelOption, ImageResult, PromptHistoryItem, SceneOptionItem, TaskResult, TaskSceneConfig, UserAsset, UserHistoryCard } from "@/types";
 
 const auth = useAuthStore();
 const router = useRouter();
@@ -164,6 +171,7 @@ interface UploadPreviewItem {
 
 const DEFAULT_MAX_REFERENCE_IMAGES = 6;
 const referenceItems = ref<UploadPreviewItem[]>([]);
+const assetPickerOpen = ref(false);
 const fileInput = ref<HTMLInputElement | null>(null);
 const referenceUploadBlockRef = ref<HTMLElement | null>(null);
 const referenceDragActive = ref(false);
@@ -828,6 +836,36 @@ function updateReferenceItem(id: string, patch: Partial<UploadPreviewItem>) {
   };
 }
 
+function addLibraryAssetToReference(asset: UserAsset) {
+  const limit = maxReferenceImages.value;
+  if (referenceItems.value.some((item) => item.remoteUrl === asset.image_url)) {
+    message.info("这张素材已在参考图中");
+    return false;
+  }
+  if (referenceItems.value.length >= limit) {
+    message.warning(`当前模型最多支持 ${limit} 张参考图`);
+    return false;
+  }
+  referenceItems.value.push({
+    id: `asset-${asset.id}-${Date.now()}`,
+    localUrl: asset.thumb_url || asset.image_url,
+    remoteUrl: asset.image_url,
+    status: "success",
+  });
+  return true;
+}
+
+async function handlePickUserAsset(asset: UserAsset) {
+  if (addLibraryAssetToReference(asset)) {
+    assetPickerOpen.value = false;
+  }
+}
+
+async function openAssetPicker() {
+  if (!(await ensureAuthenticated())) return;
+  assetPickerOpen.value = true;
+}
+
 async function uploadReferenceFiles(files: File[]) {
   const imageFiles = files.filter((file) => isReferenceImageFile(file));
   if (!imageFiles.length) {
@@ -843,16 +881,29 @@ async function uploadReferenceFiles(files: File[]) {
     return;
   }
 
-  const acceptedFiles = imageFiles.slice(0, remainingSlots);
-  const skippedDueToLimit = imageFiles.length - acceptedFiles.length;
-
-  if (skippedDueToLimit > 0) {
-    message.warning(`当前模型最多支持 ${maxReferenceImages.value} 张参考图，本次仅上传前 ${acceptedFiles.length} 张`);
+  const quota = await getUserAssetStats();
+  if (quota.remaining <= 0) {
+    message.warning(getAssetQuotaFullMessage(quota));
+    return;
   }
+
+  const referenceLimitedFiles = imageFiles.slice(0, remainingSlots);
+  const acceptedFiles = referenceLimitedFiles.slice(0, quota.remaining);
+  const skippedDueToModel = imageFiles.length - referenceLimitedFiles.length;
+  const skippedDueToQuota = referenceLimitedFiles.length - acceptedFiles.length;
+
+  if (skippedDueToModel > 0) {
+    message.warning(`当前模型最多支持 ${maxReferenceImages.value} 张参考图，本次仅上传前 ${referenceLimitedFiles.length} 张`);
+  }
+  if (skippedDueToQuota > 0) {
+    message.warning(getAssetQuotaTruncatedMessage(acceptedFiles.length, quota.remaining));
+  }
+  if (!acceptedFiles.length) return;
 
   let uploadedCount = 0;
   let failedCount = 0;
   let oversizedCount = 0;
+  let quotaErrorShown = false;
 
   for (const file of acceptedFiles) {
     if (file.size > MAX_REFERENCE_FILE_SIZE) {
@@ -871,18 +922,24 @@ async function uploadReferenceFiles(files: File[]) {
     referenceItems.value.push(item);
 
     try {
-      const res = await uploadReferenceImage(file, "ref");
+      const res = await uploadUserAssetFile(file);
       revokeObjectUrl(objectUrl);
       updateReferenceItem(item.id, {
         objectUrl: undefined,
-        localUrl: res.url,
-        remoteUrl: res.url,
+        localUrl: res.asset.thumb_url || res.asset.image_url,
+        remoteUrl: res.asset.image_url,
         status: "success",
       });
       uploadedCount += 1;
-    } catch {
+    } catch (err: any) {
       updateReferenceItem(item.id, { status: "failed" });
       failedCount += 1;
+      const quotaMessage = resolveAssetQuotaErrorMessage(err);
+      if (quotaMessage) {
+        message.warning(quotaMessage);
+        quotaErrorShown = true;
+        break;
+      }
     }
   }
 
@@ -892,7 +949,7 @@ async function uploadReferenceFiles(files: File[]) {
   if (oversizedCount > 0) {
     message.warning(`${oversizedCount} 张图片超过 ${MAX_REFERENCE_FILE_SIZE_MB}MB，已跳过`);
   }
-  if (failedCount > 0) {
+  if (failedCount > 0 && !quotaErrorShown) {
     message.error(`${failedCount} 张参考图上传失败，请重试`);
   }
 }
@@ -2203,7 +2260,10 @@ watch(() => auth.isLoggedIn, (isLoggedIn) => {
               >
                 <div class="panel-head">
                   <h3>参考图</h3>
-                  <span class="panel-hint">(最多 {{ maxReferenceImages }} 张，支持拖拽上传)</span>
+                  <div class="panel-head-actions">
+                    <span class="panel-hint">(最多 {{ maxReferenceImages }} 张，支持拖拽上传)</span>
+                    <a-button type="text" size="small" class="asset-library-btn" @click.stop="openAssetPicker">素材库</a-button>
+                  </div>
                 </div>
 
                 <input
@@ -2821,6 +2881,11 @@ watch(() => auth.isLoggedIn, (isLoggedIn) => {
       :prompt="feedbackTarget?.prompt"
       :created-at="feedbackTarget?.createdAt"
     />
+    <UserAssetPicker
+      v-model:open="assetPickerOpen"
+      title="选择个人素材"
+      @select-asset="handlePickUserAsset"
+    />
     <TemplateEditorDialog ref="templateDialogRef" />
   </div>
 </template>
@@ -3428,6 +3493,7 @@ watch(() => auth.isLoggedIn, (isLoggedIn) => {
 .panel-head {
   display: flex;
   align-items: baseline;
+  justify-content: space-between;
   gap: 8px;
   margin-bottom: var(--config-title-gap);
 
@@ -3437,6 +3503,43 @@ watch(() => auth.isLoggedIn, (isLoggedIn) => {
     color: var(--config-title-color);
     margin: 0;
     font-weight: 700;
+  }
+}
+
+.panel-head-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.asset-library-btn {
+  height: 30px;
+  padding-inline: 12px !important;
+  border-radius: 999px !important;
+  color: #a46d19 !important;
+  font-size: 12px;
+  font-weight: 700;
+  background: linear-gradient(180deg, rgba(255, 247, 231, 0.96), rgba(255, 238, 205, 0.96)) !important;
+  border: 1px solid rgba(239, 199, 132, 0.96) !important;
+  box-shadow: 0 8px 18px rgba(236, 185, 88, 0.12);
+  transition:
+    transform var(--motion-duration-press) var(--motion-ease-soft),
+    color var(--motion-duration-fast) var(--motion-ease-soft),
+    background var(--motion-duration-fast) var(--motion-ease-soft),
+    border-color var(--motion-duration-fast) var(--motion-ease-soft),
+    box-shadow var(--motion-duration-fast) var(--motion-ease-soft);
+
+  &:hover {
+    color: #8f5a0d !important;
+    background: linear-gradient(180deg, rgba(255, 241, 214, 0.98), rgba(255, 230, 183, 0.98)) !important;
+    border-color: #efc784 !important;
+    transform: translateY(-1px);
+    box-shadow: 0 12px 22px rgba(236, 185, 88, 0.18);
+  }
+
+  &:active {
+    transform: translateY(0);
+    box-shadow: 0 6px 14px rgba(236, 185, 88, 0.12);
   }
 }
 
@@ -5381,6 +5484,20 @@ html:is([data-theme="dark"], [data-theme="midnight"]) .generate-page .history-bt
     background: var(--theme-control-hover-bg) !important;
     border-color: var(--theme-border-strong) !important;
     box-shadow: 0 10px 20px var(--theme-shadow-soft);
+  }
+}
+
+html:is([data-theme="dark"], [data-theme="midnight"]) .generate-page .asset-library-btn {
+  color: var(--theme-title) !important;
+  background: linear-gradient(180deg, rgba(61, 49, 31, 0.96), rgba(46, 37, 24, 0.96)) !important;
+  border-color: rgba(214, 168, 84, 0.4) !important;
+  box-shadow: 0 10px 20px rgba(0, 0, 0, 0.18);
+
+  &:hover {
+    color: #ffd995 !important;
+    background: linear-gradient(180deg, rgba(78, 62, 38, 0.98), rgba(58, 46, 29, 0.98)) !important;
+    border-color: rgba(239, 199, 132, 0.56) !important;
+    box-shadow: 0 12px 24px rgba(0, 0, 0, 0.22);
   }
 }
 
