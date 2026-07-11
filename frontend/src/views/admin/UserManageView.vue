@@ -2,7 +2,7 @@
 import { ref, onMounted, reactive, computed, watch } from "vue";
 import { useRouter } from "vue-router";
 import { message, Modal } from "ant-design-vue";
-import { CopyOutlined, PlusOutlined, TeamOutlined, WalletOutlined, SearchOutlined, UndoOutlined } from "@ant-design/icons-vue";
+import { CopyOutlined, EditOutlined, PlusOutlined, TeamOutlined, WalletOutlined, SearchOutlined, UndoOutlined, CaretDownOutlined } from "@ant-design/icons-vue";
 import AdminUserInfoDialog from "@/components/admin/AdminUserInfoDialog.vue";
 import AdminUserCreditLogsDialog from "@/components/admin/AdminUserCreditLogsDialog.vue";
 import {
@@ -11,6 +11,7 @@ import {
   updateUserStatus,
   updateUserRole,
   updateUserWhitelist,
+  updateUserRemark,
   resetUserPassword,
   allocateCredits,
   resetUserCredits,
@@ -54,15 +55,20 @@ const userInfoDialogOpen = ref(false);
 const userInfoTarget = ref<AdminUser | null>(null);
 const creditLogsDialogOpen = ref(false);
 const creditLogsTarget = ref<AdminUser | null>(null);
+const remarkOpen = ref(false);
+const remarkLoading = ref(false);
+const remarkTarget = ref<AdminUser | null>(null);
+const remarkForm = reactive({ remark: "" });
 const currentPage = ref(1);
 const pageSize = 30;
 
 const columns = [
   { title: "ID", dataIndex: "id", width: 58 },
   { title: "用户", dataIndex: "username", width: 212 },
+  { title: "用户备注", dataIndex: "remark", width: 180 },
   { title: "角色", dataIndex: "role", width: 88 },
-  { title: "剩余积分", dataIndex: "credits", width: 92 },
-  { title: "已消耗积分", dataIndex: "consumed_credits", width: 108 },
+  { title: "剩余积分", dataIndex: "credits", width: 108 },
+  { title: "已消耗积分", dataIndex: "consumed_credits", width: 124 },
   { title: "状态", dataIndex: "status", width: 82 },
   { title: "创建时间", dataIndex: "created_at", width: 154 },
   { title: "操作", key: "action", width: 400 },
@@ -275,6 +281,27 @@ function openCreditLogsDialog(user: AdminUser) {
   creditLogsDialogOpen.value = true;
 }
 
+function openRemarkDialog(user: AdminUser) {
+  remarkTarget.value = user;
+  remarkForm.remark = user.remark || "";
+  remarkOpen.value = true;
+}
+
+async function handleSaveRemark() {
+  if (!remarkTarget.value) return;
+  remarkLoading.value = true;
+  try {
+    await updateUserRemark(remarkTarget.value.id, remarkForm.remark);
+    message.success("备注已保存");
+    remarkOpen.value = false;
+    await load();
+  } catch (err: any) {
+    message.error(err.response?.data?.detail || "备注保存失败");
+  } finally {
+    remarkLoading.value = false;
+  }
+}
+
 function handleViewUserData(user: AdminUser) {
   userInfoDialogOpen.value = false;
   router.push({ path: "/admin/user-tasks", query: { user: user.id } });
@@ -307,6 +334,10 @@ function resetFilters() {
   filters.whitelist = undefined;
   filters.sort = "created_at_desc";
   currentPage.value = 1;
+}
+
+function toggleDescSort(sortKey: "credits_desc" | "consumed_credits_desc") {
+  filters.sort = filters.sort === sortKey ? "created_at_desc" : sortKey;
 }
 
 function handlePageChange(page: number) {
@@ -413,9 +444,39 @@ function promoActivityRowKey(record: {
         :loading="loading"
         row-key="id"
         :pagination="false"
-        :scroll="{ x: 1340 }"
+        :scroll="{ x: 1520 }"
         class="admin-mobile-table"
       >
+        <template #headerCell="{ column }">
+          <template v-if="column.dataIndex === 'credits'">
+            <div class="sortable-header">
+              <span>剩余积分</span>
+              <button
+                type="button"
+                class="column-sort-btn"
+                :class="{ active: filters.sort === 'credits_desc' }"
+                title="按剩余积分从高到低"
+                @click.stop="toggleDescSort('credits_desc')"
+              >
+                <CaretDownOutlined />
+              </button>
+            </div>
+          </template>
+          <template v-else-if="column.dataIndex === 'consumed_credits'">
+            <div class="sortable-header">
+              <span>已消耗积分</span>
+              <button
+                type="button"
+                class="column-sort-btn"
+                :class="{ active: filters.sort === 'consumed_credits_desc' }"
+                title="按已消耗积分从高到低"
+                @click.stop="toggleDescSort('consumed_credits_desc')"
+              >
+                <CaretDownOutlined />
+              </button>
+            </div>
+          </template>
+        </template>
         <template #bodyCell="{ column, record }">
           <template v-if="column.dataIndex === 'id'">
             <div class="id-cell">
@@ -442,6 +503,15 @@ function promoActivityRowKey(record: {
                 <span v-if="record.email" class="user-cell-sub">{{ record.email }}</span>
               </div>
             </div>
+          </template>
+          <template v-else-if="column.dataIndex === 'remark'">
+            <button type="button" class="remark-cell" @click="openRemarkDialog(record)">
+              <a-tooltip v-if="record.remark" :title="record.remark">
+                <span class="remark-text">{{ record.remark }}</span>
+              </a-tooltip>
+              <span v-else class="remark-placeholder">添加备注</span>
+              <EditOutlined class="remark-edit-icon" />
+            </button>
           </template>
           <template v-else-if="column.dataIndex === 'role'">
             <a-tag class="warm-tag" :class="record.role === 'admin' ? 'warm-tag-role-admin' : 'warm-tag-role-user'">
@@ -608,6 +678,32 @@ function promoActivityRowKey(record: {
         </a-form-item>
         <a-form-item label="备注说明" style="margin-bottom: 0">
           <a-input v-model:value="creditsForm.description" class="warm-input" placeholder="请输入备注说明" />
+        </a-form-item>
+      </a-form>
+    </a-modal>
+
+    <a-modal
+      v-model:open="remarkOpen"
+      :title="`用户备注 — ${remarkTarget?.username}`"
+      :confirm-loading="remarkLoading"
+      :ok-button-props="{ class: 'warm-primary-btn' }"
+      :cancel-button-props="{ class: 'warm-secondary-btn' }"
+      ok-text="保存"
+      cancel-text="取消"
+      centered
+      :width="480"
+      @ok="handleSaveRemark"
+    >
+      <a-form layout="vertical" style="margin-top: 16px">
+        <a-form-item label="备注" style="margin-bottom: 0">
+          <a-textarea
+            v-model:value="remarkForm.remark"
+            class="warm-input"
+            :rows="4"
+            :maxlength="500"
+            show-count
+            placeholder="填写用户备注，便于后台识别"
+          />
         </a-form-item>
       </a-form>
     </a-modal>
@@ -885,6 +981,43 @@ function promoActivityRowKey(record: {
   word-break: break-all;
 }
 
+.remark-cell {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  padding: 0;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  text-align: left;
+}
+
+.remark-text {
+  display: block;
+  max-width: 140px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: #4c341a;
+  font-size: 13px;
+}
+
+.remark-placeholder {
+  color: #b8a38a;
+  font-size: 13px;
+}
+
+.remark-edit-icon {
+  flex-shrink: 0;
+  color: #c4a882;
+  font-size: 12px;
+}
+
+.remark-cell:hover .remark-edit-icon {
+  color: #b16d10;
+}
+
 .id-cell {
   display: inline-flex;
   align-items: center;
@@ -905,6 +1038,40 @@ function promoActivityRowKey(record: {
   height: 24px;
   padding: 0 !important;
   color: #b16d10 !important;
+}
+
+.sortable-header {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  white-space: nowrap;
+}
+
+.column-sort-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: none;
+  border-radius: 5px;
+  background: transparent;
+  color: #c4a882;
+  cursor: pointer;
+  font-size: 11px;
+  line-height: 1;
+  transition: color 0.15s ease, background 0.15s ease;
+
+  &:hover {
+    color: #b16d10;
+    background: #fff4df;
+  }
+
+  &.active {
+    color: #c7770d;
+    background: #fff0d3;
+  }
 }
 
 .table-actions {

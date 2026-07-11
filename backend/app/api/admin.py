@@ -8,7 +8,7 @@ from app.api.deps import require_admin, require_superadmin
 from app.models.user import User
 from app.schemas.admin import (
     CreateUserRequest, UserOut, UpdateStatusRequest, UpdateRoleRequest,
-    UpdateWhitelistRequest, ResetPasswordRequest, StatsOut, AllocateCreditsRequest, ResetCreditsRequest, CreditLogOut,
+    UpdateWhitelistRequest, UpdateRemarkRequest, ResetPasswordRequest, StatsOut, AllocateCreditsRequest, ResetCreditsRequest, CreditLogOut,
     CreateRedeemKeysBatchRequest, RedeemKeyBatchOut, RedeemKeyOut, UpdateRedeemKeyStatusRequest, PaymentOrderAdminOut,
     AnalyticsSummaryOut, AnalyticsTimeseriesOut, AnalyticsBreakdownOut, AnalyticsRedeemRevenueOut, ErrorAnalyticsOut, DailyReportTestOut,
     AdminUserPromoDashboardOut,
@@ -23,7 +23,7 @@ from app.schemas.history import HistoryResponse, UserHistoryCardItem, UserHistor
 from app.services.business_id_service import get_user_by_business_id
 from app.services.admin_service import (
     create_user, list_users, update_user_status, update_user_role,
-    update_user_whitelist, reset_user_password, get_stats, allocate_credits, reset_user_credits, get_credit_logs,
+    update_user_whitelist, update_user_remark, reset_user_password, get_stats, allocate_credits, reset_user_credits, get_credit_logs,
     list_payment_orders,
     get_analytics_summary, get_analytics_timeseries, get_analytics_breakdown, get_analytics_redeem_revenue,
     get_analytics_payment_revenue, get_error_analytics,
@@ -96,6 +96,16 @@ def admin_update_whitelist(
     db: Session = Depends(get_db),
 ):
     return update_user_whitelist(db, user_id, body.is_whitelisted)
+
+
+@router.put("/users/{user_id}/remark", response_model=UserOut)
+def admin_update_remark(
+    user_id: str,
+    body: UpdateRemarkRequest,
+    _user: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    return update_user_remark(db, user_id, body.remark)
 
 
 @router.put("/users/{user_id}/reset-password", response_model=UserOut)

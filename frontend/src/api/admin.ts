@@ -69,6 +69,10 @@ export function updateUserWhitelist(userId: string, isWhitelisted: boolean): Pro
   return client.put(`/admin/users/${userId}/whitelist`, { is_whitelisted: isWhitelisted });
 }
 
+export function updateUserRemark(userId: string, remark: string): Promise<AdminUser> {
+  return client.put(`/admin/users/${userId}/remark`, { remark });
+}
+
 export function resetUserPassword(userId: string, newPassword: string): Promise<AdminUser> {
   return client.put(`/admin/users/${userId}/reset-password`, { new_password: newPassword });
 }

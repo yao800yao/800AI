@@ -92,6 +92,7 @@ def on_startup():
     _ensure_user_api_key_schema()
     _drop_legacy_user_credits_column()
     _ensure_user_whitelist_column()
+    _ensure_user_remark_column()
     _ensure_user_referral_schema()
     _ensure_user_promo_code_schema()
     _ensure_user_identity_schema()
@@ -122,6 +123,8 @@ def _ensure_schema_compat():
             conn.execute(text("ALTER TABLE users ADD COLUMN avatar_url VARCHAR(500) DEFAULT ''"))
         if "is_whitelisted" not in user_columns:
             conn.execute(text("ALTER TABLE users ADD COLUMN is_whitelisted BOOLEAN DEFAULT 0"))
+        if "remark" not in user_columns:
+            conn.execute(text("ALTER TABLE users ADD COLUMN remark VARCHAR(500) DEFAULT ''"))
     task_columns = {col["name"] for col in inspector.get_columns("tasks")}
     with engine.begin() as conn:
         if "model" not in task_columns:
@@ -439,6 +442,20 @@ def _ensure_user_whitelist_column():
 
     with engine.begin() as conn:
         conn.execute(text("ALTER TABLE users ADD COLUMN is_whitelisted BOOLEAN DEFAULT 0"))
+
+
+def _ensure_user_remark_column():
+    inspector = inspect(engine)
+    if "users" not in inspector.get_table_names():
+        return
+
+    user_columns = {col["name"] for col in inspector.get_columns("users")}
+    if "remark" in user_columns:
+        return
+
+    with engine.begin() as conn:
+        conn.execute(text("ALTER TABLE users ADD COLUMN remark VARCHAR(500) DEFAULT ''"))
+        conn.execute(text("UPDATE users SET remark = '' WHERE remark IS NULL"))
 
 
 def _ensure_user_referral_schema():

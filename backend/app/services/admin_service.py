@@ -92,6 +92,7 @@ def _serialize_user(user: User) -> dict:
         "role": user.role,
         "status": user.status,
         "is_whitelisted": bool(user.is_whitelisted),
+        "remark": user.remark or "",
         "credits": get_user_credit_balance(db, user.id) if db else 0,
         "created_at": user.created_at,
     }
@@ -184,6 +185,7 @@ def _serialize_user_with_balance(user: User, balance: int, consumed_credits: int
         "role": user.role,
         "status": user.status,
         "is_whitelisted": bool(user.is_whitelisted),
+        "remark": user.remark or "",
         "credits": int(balance or 0),
         "consumed_credits": int(consumed_credits or 0),
         "created_at": user.created_at,
@@ -234,6 +236,21 @@ def update_user_whitelist(db: Session, user_id: str, is_whitelisted: bool) -> di
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="无法修改超级管理员")
 
     user.is_whitelisted = is_whitelisted
+    db.commit()
+    db.refresh(user)
+    return _serialize_user(user)
+
+
+def update_user_remark(db: Session, user_id: str, remark: str) -> dict:
+    user = get_user_by_business_id(db, user_id)
+    if not user:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="用户不存在")
+
+    normalized = (remark or "").strip()
+    if len(normalized) > 500:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="备注最多500字")
+
+    user.remark = normalized
     db.commit()
     db.refresh(user)
     return _serialize_user(user)

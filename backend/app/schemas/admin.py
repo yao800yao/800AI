@@ -16,6 +16,7 @@ class UserOut(BaseModel):
     role: str
     status: str
     is_whitelisted: bool = False
+    remark: str = ""
     credits: int = 0
     consumed_credits: int = 0
     created_at: datetime | None = None
@@ -111,6 +112,10 @@ class UpdateRoleRequest(BaseModel):
 
 class UpdateWhitelistRequest(BaseModel):
     is_whitelisted: bool
+
+
+class UpdateRemarkRequest(BaseModel):
+    remark: str = ""
 
 
 class ResetPasswordRequest(BaseModel):

@@ -305,6 +305,7 @@ export interface AdminUser {
   role: string;
   status: string;
   is_whitelisted: boolean;
+  remark?: string;
   credits: number;
   consumed_credits: number;
   created_at: string;
