@@ -1599,12 +1599,14 @@ upload_path = Path(settings.UPLOAD_DIR)
 upload_path.mkdir(parents=True, exist_ok=True)
 app.mount("/uploads", StaticFiles(directory=str(upload_path)), name="uploads")
 
-from app.api import auth, tasks, images, history, admin, upload, api_key, templates, prompt_reverse, external_api_config, feedback, system_messages, user_api_keys, payment, user_assets  # noqa: E402
+from app.api import auth, tasks, images, history, admin, upload, api_key, templates, prompt_reverse, external_api_config, feedback, system_messages, user_api_keys, payment, user_assets, user_prompts  # noqa: E402
 app.include_router(auth.router)
 app.include_router(user_api_keys.router)
 app.include_router(templates.router)
 app.include_router(user_assets.category_router)
 app.include_router(user_assets.router)
+app.include_router(user_prompts.category_router)
+app.include_router(user_prompts.router)
 app.include_router(tasks.router)
 app.include_router(images.router)
 app.include_router(history.router)

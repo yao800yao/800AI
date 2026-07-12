@@ -1,6 +1,8 @@
 from app.models.user import User
 from app.models.user_asset_category import UserAssetCategory
 from app.models.user_asset import UserAsset
+from app.models.user_prompt_category import UserPromptCategory
+from app.models.user_prompt import UserPrompt
 from app.models.task import Task
 from app.models.image import Image
 from app.models.regenerate_log import RegenerateLog
@@ -25,6 +27,8 @@ __all__ = [
     "User",
     "UserAssetCategory",
     "UserAsset",
+    "UserPromptCategory",
+    "UserPrompt",
     "Task",
     "Image",
     "RegenerateLog",

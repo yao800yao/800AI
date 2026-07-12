@@ -389,12 +389,14 @@ html, body, #app {
 }
 
 // Library pickers manage their own internal scroll on desktop.
-.asset-library-modal-wrap .ant-modal-body {
+.asset-library-modal-wrap .ant-modal-body,
+.user-prompt-library-modal-wrap .ant-modal-body {
   overflow: visible;
 }
 
 @media (max-width: 960px) {
-  .asset-library-modal-wrap .ant-modal-body {
+  .asset-library-modal-wrap .ant-modal-body,
+.user-prompt-library-modal-wrap .ant-modal-body {
     overflow-x: hidden;
     overflow-y: auto;
   }
