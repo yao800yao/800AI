@@ -93,6 +93,7 @@ export interface HistoryItem {
   custom_size?: string;
   credit_cost: number;
   credit_refunded?: boolean;
+  used_fallback_api?: boolean;
   status: string;
   error_message?: string;
   task_is_deleted?: boolean;
@@ -100,6 +101,7 @@ export interface HistoryItem {
   soft_deleted_count?: number;
   created_at: string;
   images: ImageResult[];
+  api_attempts?: TaskApiAttempt[];
 }
 
 export interface HistoryFilter {
@@ -111,6 +113,7 @@ export interface HistoryFilter {
   user_id?: string;
   start_date?: string;
   end_date?: string;
+  used_fallback_api?: boolean;
   respect_pins?: boolean;
   include_prompt_reverse?: boolean;
 }
@@ -119,6 +122,21 @@ export interface HistoryResponse {
   total: number;
   total_credit_cost: number;
   items: HistoryItem[];
+}
+
+export interface TaskApiAttempt {
+  id?: number | null;
+  image_id?: number | null;
+  image_index?: number | null;
+  api_config_id?: number | null;
+  api_config_name: string;
+  attempt_index: number;
+  is_fallback: boolean;
+  status: "success" | "failed" | string;
+  http_status?: number | null;
+  error_message?: string;
+  duration_ms?: number | null;
+  created_at?: string | null;
 }
 
 export interface UserHistoryCard {
@@ -157,10 +175,12 @@ export interface UserHistoryCard {
   custom_size?: string;
   credit_cost: number;
   credit_refunded?: boolean;
+  used_fallback_api?: boolean;
   created_at: string;
   run_time?: number | null;
   error_message?: string;
   images: ImageResult[];
+  api_attempts?: TaskApiAttempt[];
 }
 
 export interface UserHistoryResponse {
@@ -632,6 +652,7 @@ export interface AdminAnalyticsRedeemRevenue {
 }
 
 export interface AdminErrorAnalyticsItem {
+  error_category: string;
   error_message: string;
   count: number;
 }
@@ -639,8 +660,62 @@ export interface AdminErrorAnalyticsItem {
 export interface AdminErrorAnalytics {
   range_label: string;
   total_failed_tasks: number;
+  fallback_task_total: number;
+  fallback_success_tasks: number;
+  fallback_failed_tasks: number;
+  distinct_error_categories: number;
   distinct_error_messages: number;
   items: AdminErrorAnalyticsItem[];
+}
+
+export type ErrorTrendGranularity = "1hour" | "3hour" | "6hour";
+
+export interface AdminErrorCategoryTimeseriesSeries {
+  error_category: string;
+  total_count: number;
+}
+
+export interface AdminErrorCategoryTimeseriesPoint {
+  label: string;
+  bucket_start?: string | null;
+  bucket_end?: string | null;
+  total_failed_tasks: number;
+  categories: Record<string, number>;
+}
+
+export interface AdminErrorCategoryTimeseries {
+  granularity: ErrorTrendGranularity;
+  range_label: string;
+  series: AdminErrorCategoryTimeseriesSeries[];
+  points: AdminErrorCategoryTimeseriesPoint[];
+}
+
+export interface AdminErrorTaskItem {
+  task_id: string;
+  user_id: string;
+  username: string;
+  avatar_url: string;
+  task_type: TaskType;
+  model: string;
+  source: TaskSource;
+  mode: TaskMode;
+  prompt: string;
+  status: string;
+  error_message: string;
+  credit_cost: number;
+  credit_refunded: boolean;
+  used_fallback_api?: boolean;
+  primary_api_config_name?: string;
+  primary_http_status?: number | null;
+  fallback_api_config_name?: string;
+  fallback_status?: "unused" | "success" | "failed" | "partial" | string;
+  fallback_error_message?: string;
+  created_at?: string | null;
+}
+
+export interface AdminErrorTaskList {
+  total: number;
+  items: AdminErrorTaskItem[];
 }
 
 export interface AdminPaymentOrder {
@@ -754,6 +829,10 @@ export interface ExternalApiSceneBinding {
   api_config_name: string;
   api_group_name: string;
   api_status?: ExternalApiConfigStatus | null;
+  backup_api_config_id?: number | null;
+  backup_api_config_name: string;
+  backup_api_group_name: string;
+  backup_api_status?: ExternalApiConfigStatus | null;
   credit_cost: number;
   resolution_credit_costs_json: string;
   max_reference_images: number;
@@ -773,6 +852,7 @@ export interface ExternalApiSceneBindingCreatePayload {
   hide_resolution: boolean;
   hide_custom_size: boolean;
   api_config_id: number | null;
+  backup_api_config_id: number | null;
   display_name: string;
   subtitle: string;
   credit_cost: number;

@@ -12,6 +12,7 @@ import re
 import threading
 import time
 import uuid
+from dataclasses import dataclass
 from datetime import timedelta
 
 import httpx
@@ -20,9 +21,11 @@ from fastapi import HTTPException
 
 from app.config import settings
 from app.database import SessionLocal
+from app.models.external_api_config import ExternalApiConfig
 from app.models.image import Image
 from app.models.regenerate_log import RegenerateLog
 from app.models.task import Task
+from app.models.task_api_attempt import TaskApiAttempt
 from app.services.business_id_service import task_external_id, user_external_id
 from app.services.distributed_lock_service import acquire_redis_lock, release_redis_lock
 from app.services.cos_service import build_object_key, load_image_bytes, upload_bytes_to_cos
@@ -30,7 +33,7 @@ from app.services.external_api_config_service import (
     build_external_request_kwargs,
     build_secret_variables,
     render_config,
-    require_scene_config,
+    resolve_scene_generation_configs,
     resolve_mapped_resolution,
     SCENE_INPAINT,
     should_use_multipart_request,
@@ -48,6 +51,27 @@ TASK_PROCESSING_LOCK_TIMEOUT_SECONDS = max(int(settings.AI_TIMEOUT or 0) + 600, 
 SINGLE_IMAGE_LOCK_TIMEOUT_SECONDS = max(int(settings.AI_TIMEOUT or 0) + 600, 900)
 SYNC_GENERATION_MAX_WORKERS = max(int(settings.SYNC_GENERATION_MAX_WORKERS or 0), 1)
 _sync_generation_semaphore = threading.BoundedSemaphore(SYNC_GENERATION_MAX_WORKERS)
+FALLBACK_HTTP_STATUSES = {502, 503, 504}
+
+
+@dataclass
+class ApiAttemptRecord:
+    api_config_id: int | None
+    api_config_name: str
+    attempt_index: int
+    is_fallback: bool
+    status: str
+    http_status: int | None
+    error_message: str
+    duration_ms: int | None
+
+
+@dataclass
+class ApiCallResult:
+    result: tuple[bytes, str] | None
+    error_message: str
+    http_status_code: int | None
+    attempts: list[ApiAttemptRecord]
 
 
 def _clip_error_message(message: str) -> str:
@@ -68,6 +92,152 @@ def _clip_response_preview(payload: object) -> str:
     if len(preview) <= MAX_RESPONSE_PREVIEW_LENGTH:
         return preview
     return preview[:MAX_RESPONSE_PREVIEW_LENGTH] + "..."
+
+
+def _measure_elapsed_seconds(started_perf: float | None) -> float | None:
+    if started_perf is None:
+        return None
+    return round(max(time.perf_counter() - started_perf, 0), 2)
+
+
+def _measure_elapsed_ms(started_perf: float | None) -> int | None:
+    if started_perf is None:
+        return None
+    return max(int(round(max(time.perf_counter() - started_perf, 0) * 1000)), 0)
+
+
+def _format_elapsed_fragment(elapsed_seconds: float | None) -> str:
+    if elapsed_seconds is None:
+        return ""
+    return f"（实际耗时 {elapsed_seconds} 秒）"
+
+
+def _extract_fallback_http_status(error_message: str) -> int | None:
+    message = (error_message or "").strip()
+    if not message:
+        return None
+    patterns = (
+        r"http\D*(5\d{2})",
+        r"status(?:\s*code)?\D*(5\d{2})",
+        r"状态(?:码)?\D*(5\d{2})",
+        r"(?:错误码|错误|error|code|码)\D{0,20}(5\d{2})",
+        r"(?<![\dxX])(5\d{2})(?![\dxX])\s*(?:bad gateway|internal server error|service unavailable|gateway timeout|server error)",
+    )
+    for pattern in patterns:
+        match = re.search(pattern, message, flags=re.IGNORECASE)
+        if not match:
+            continue
+        candidate = int(match.group(1))
+        if candidate in FALLBACK_HTTP_STATUSES:
+            return candidate
+    return None
+
+
+def _is_configured_image_path_missing_error(error_message: str) -> bool:
+    message = (error_message or "").strip()
+    return "生图接口返回内容缺少配置路径" in message and "对应的 base64 数据" in message
+
+
+def _should_use_fallback_api(http_status: int | None, error_message: str) -> bool:
+    if http_status is not None and int(http_status) in FALLBACK_HTTP_STATUSES:
+        return True
+    if _is_configured_image_path_missing_error(error_message):
+        return True
+    detected_status = _extract_fallback_http_status(error_message)
+    return detected_status is not None
+
+
+def _classify_generation_request_exception(
+    exc: Exception,
+    *,
+    started_perf: float | None,
+) -> tuple[str, tuple[object, ...], str]:
+    elapsed_seconds = _measure_elapsed_seconds(started_perf)
+    elapsed_fragment = _format_elapsed_fragment(elapsed_seconds)
+
+    if isinstance(exc, httpx.ConnectTimeout):
+        return (
+            "Generation API connect timed out after %s seconds (configured timeout=%s seconds)",
+            (elapsed_seconds if elapsed_seconds is not None else "unknown", settings.AI_TIMEOUT),
+            f"生图接口连接超时{elapsed_fragment or f'（配置超时 {settings.AI_TIMEOUT} 秒）'}",
+        )
+    if isinstance(exc, httpx.ReadTimeout):
+        return (
+            "Generation API read timed out after %s seconds (configured timeout=%s seconds)",
+            (elapsed_seconds if elapsed_seconds is not None else "unknown", settings.AI_TIMEOUT),
+            f"生图接口响应读取超时{elapsed_fragment or f'（配置超时 {settings.AI_TIMEOUT} 秒）'}",
+        )
+    if isinstance(exc, httpx.WriteTimeout):
+        return (
+            "Generation API write timed out after %s seconds (configured timeout=%s seconds)",
+            (elapsed_seconds if elapsed_seconds is not None else "unknown", settings.AI_TIMEOUT),
+            f"生图接口请求发送超时{elapsed_fragment or f'（配置超时 {settings.AI_TIMEOUT} 秒）'}",
+        )
+    if isinstance(exc, httpx.PoolTimeout):
+        return (
+            "Generation API pool timed out after %s seconds (configured timeout=%s seconds)",
+            (elapsed_seconds if elapsed_seconds is not None else "unknown", settings.AI_TIMEOUT),
+            f"生图接口连接池等待超时{elapsed_fragment or f'（配置超时 {settings.AI_TIMEOUT} 秒）'}",
+        )
+    if isinstance(exc, httpx.RemoteProtocolError):
+        return (
+            "Generation API upstream connection closed unexpectedly after %s seconds: %s",
+            (elapsed_seconds if elapsed_seconds is not None else "unknown", str(exc)),
+            _clip_error_message(f"生图接口连接被上游异常断开{elapsed_fragment}: {exc}"),
+        )
+    if isinstance(exc, httpx.ConnectError):
+        return (
+            "Generation API connect error after %s seconds: %s",
+            (elapsed_seconds if elapsed_seconds is not None else "unknown", str(exc)),
+            _clip_error_message(f"生图接口连接失败{elapsed_fragment}: {exc}"),
+        )
+    if isinstance(exc, httpx.ReadError):
+        return (
+            "Generation API read error after %s seconds: %s",
+            (elapsed_seconds if elapsed_seconds is not None else "unknown", str(exc)),
+            _clip_error_message(f"生图接口响应读取失败{elapsed_fragment}: {exc}"),
+        )
+    if isinstance(exc, httpx.WriteError):
+        return (
+            "Generation API write error after %s seconds: %s",
+            (elapsed_seconds if elapsed_seconds is not None else "unknown", str(exc)),
+            _clip_error_message(f"生图接口请求发送失败{elapsed_fragment}: {exc}"),
+        )
+    if isinstance(exc, httpx.CloseError):
+        return (
+            "Generation API connection close error after %s seconds: %s",
+            (elapsed_seconds if elapsed_seconds is not None else "unknown", str(exc)),
+            _clip_error_message(f"生图接口连接关闭异常{elapsed_fragment}: {exc}"),
+        )
+    if isinstance(exc, httpx.ProtocolError):
+        return (
+            "Generation API protocol error after %s seconds: %s",
+            (elapsed_seconds if elapsed_seconds is not None else "unknown", str(exc)),
+            _clip_error_message(f"生图接口协议异常{elapsed_fragment}: {exc}"),
+        )
+    if isinstance(exc, httpx.NetworkError):
+        return (
+            "Generation API network error after %s seconds: %s",
+            (elapsed_seconds if elapsed_seconds is not None else "unknown", str(exc)),
+            _clip_error_message(f"生图接口网络异常{elapsed_fragment}: {exc}"),
+        )
+    if isinstance(exc, httpx.TimeoutException):
+        if elapsed_seconds is not None:
+            return (
+                "Generation API request timed out after %s seconds (configured timeout=%s seconds)",
+                (elapsed_seconds, settings.AI_TIMEOUT),
+                f"生图接口请求超时（实际耗时 {elapsed_seconds} 秒，配置超时 {settings.AI_TIMEOUT} 秒）",
+            )
+        return (
+            "Generation API request timed out after %s seconds (configured timeout=%s seconds)",
+            ("unknown", settings.AI_TIMEOUT),
+            f"生图接口请求超时（配置超时 {settings.AI_TIMEOUT} 秒）",
+        )
+    return (
+        "Generation API request failed after %s seconds: %s",
+        (elapsed_seconds if elapsed_seconds is not None else "unknown", str(exc)),
+        _clip_error_message(f"生图接口请求失败{elapsed_fragment}: {exc}"),
+    )
 
 
 def _mark_task_request_started(task: Task) -> bool:
@@ -279,27 +449,22 @@ def _extract_legacy_image_data(payload: dict) -> tuple[tuple[bytes, str] | None,
     return None, "生图接口返回内容缺少图片数据 inlineData"
 
 
-def _call_gemini_api(
+def _call_generation_api_once(
+    db,
+    *,
+    config: ExternalApiConfig,
+    scene_key: str,
     prompt: str,
     aspect_ratio: str,
     image_size: str,
     custom_size: str,
-    model_key: str = "",
     reference_images: list[str] | None = None,
     mode: str = "generate",
     source_image: str = "",
     mask_image: str = "",
-) -> tuple[tuple[bytes, str] | None, str, int | None]:
-    """
-    Call Gemini image generation API.
-    Returns ((image_bytes, mime_type), "", None) on success and
-    (None, error_message, http_status_code) on HTTP failure.
-    """
-    db = SessionLocal()
-
+) -> tuple[tuple[bytes, str] | None, str, int | None, int | None]:
+    request_started_perf: float | None = None
     try:
-        scene_key = SCENE_INPAINT if mode == "inpaint" else model_key
-        config = require_scene_config(db, scene_key)
         config_name = config.name
         configured_field_path = (config.result_base64_field or "").strip()
         mapped_resolution = resolve_mapped_resolution(db, scene_key, aspect_ratio, image_size)
@@ -320,11 +485,11 @@ def _call_gemini_api(
             source_payload = _build_reference_image_payload(source_image)
             if not source_payload:
                 logger.warning("Inpaint source image not found: %s", source_image)
-                return None, "图编辑原图不存在或无法读取", None
+                return None, "图编辑原图不存在或无法读取", None, None
             source_inline_part = source_payload.get("inline_part")
             if not isinstance(source_inline_part, dict):
                 logger.warning("Inpaint source image payload malformed: %s", source_image)
-                return None, "图编辑原图格式无效", None
+                return None, "图编辑原图格式无效", None, None
             parts.append(source_inline_part)
             render_variables["source_image"] = source_inline_part
             render_variables["source_image_base64"] = source_payload["base64"]
@@ -334,11 +499,11 @@ def _call_gemini_api(
             mask_payload = _build_reference_image_payload(mask_image)
             if not mask_payload:
                 logger.warning("Inpaint mask image not found: %s", mask_image)
-                return None, "图编辑蒙版不存在或无法读取", None
+                return None, "图编辑蒙版不存在或无法读取", None, None
             mask_inline_part = mask_payload.get("inline_part")
             if not isinstance(mask_inline_part, dict):
                 logger.warning("Inpaint mask image payload malformed: %s", mask_image)
-                return None, "图编辑蒙版格式无效", None
+                return None, "图编辑蒙版格式无效", None, None
             parts.append(mask_inline_part)
             render_variables["mask_image"] = mask_inline_part
             render_variables["mask_image_base64"] = mask_payload["base64"]
@@ -381,10 +546,7 @@ def _call_gemini_api(
 
         render_variables["contents_parts"] = parts
         render_variables["generation_config"] = generation_config
-        rendered = render_config(
-            config,
-            render_variables,
-        )
+        rendered = render_config(config, render_variables)
         request_kwargs = build_external_request_kwargs(rendered)
         db.close()
 
@@ -402,19 +564,18 @@ def _call_gemini_api(
             "multipart" if should_use_multipart_request(rendered) else "json",
         )
 
+        request_started_perf = time.perf_counter()
         with httpx.Client(timeout=settings.AI_TIMEOUT, trust_env=False) as client:
-            resp = client.post(
-                rendered.request_url,
-                **request_kwargs,
-            )
+            resp = client.post(rendered.request_url, **request_kwargs)
 
             if resp.status_code != 200:
-                logger.error(
-                    "Generation API HTTP %s: %s", resp.status_code, resp.text[:500]
+                logger.error("Generation API HTTP %s: %s", resp.status_code, resp.text[:500])
+                return (
+                    None,
+                    _clip_error_message(f"生图接口返回 HTTP {resp.status_code}: {resp.text[:500] or '(空响应)'}"),
+                    resp.status_code,
+                    _measure_elapsed_ms(request_started_perf),
                 )
-                return None, _clip_error_message(
-                    f"生图接口返回 HTTP {resp.status_code}: {resp.text[:500] or '(空响应)'}"
-                ), resp.status_code
 
             data = resp.json()
 
@@ -426,23 +587,94 @@ def _call_gemini_api(
                     "Generation API success, configured field=%s, mime=%s, image size: %d bytes",
                     configured_field_path, mime, len(img_bytes),
                 )
-                return result, "", None
+                return result, "", None, _measure_elapsed_ms(request_started_perf)
             logger.warning("Generation API configured field extraction failed: %s", error_message)
-            return None, error_message, None
+            return None, error_message, None, _measure_elapsed_ms(request_started_perf)
 
         result, error_message = _extract_legacy_image_data(data)
-        return result, error_message, None
+        return result, error_message, None, _measure_elapsed_ms(request_started_perf)
     except HTTPException as exc:
         detail = exc.detail if isinstance(exc.detail, str) else str(exc.detail)
         logger.error("Generation API config error: %s", detail)
-        return None, _clip_error_message(detail), None
+        return None, _clip_error_message(detail), None, _measure_elapsed_ms(request_started_perf)
 
-    except httpx.TimeoutException:
-        logger.error("Generation API request timed out (%s seconds)", settings.AI_TIMEOUT)
-        return None, f"生图接口请求超时（{settings.AI_TIMEOUT} 秒）", None
-    except Exception as e:
-        logger.error("Generation API error: %s", e, exc_info=True)
-        return None, _clip_error_message(f"生图接口调用异常: {e}"), None
+    except (httpx.TimeoutException, httpx.NetworkError, httpx.ProtocolError) as exc:
+        log_message, log_args, user_message = _classify_generation_request_exception(
+            exc,
+            started_perf=request_started_perf,
+        )
+        logger.error(log_message, *log_args)
+        return None, user_message, None, _measure_elapsed_ms(request_started_perf)
+    except Exception as exc:
+        logger.error("Generation API error: %s", exc, exc_info=True)
+        return None, _clip_error_message(f"生图接口调用异常: {exc}"), None, _measure_elapsed_ms(request_started_perf)
+
+
+def _call_gemini_api(
+    prompt: str,
+    aspect_ratio: str,
+    image_size: str,
+    custom_size: str,
+    model_key: str = "",
+    reference_images: list[str] | None = None,
+    mode: str = "generate",
+    source_image: str = "",
+    mask_image: str = "",
+) -> ApiCallResult:
+    db = SessionLocal()
+    attempts: list[ApiAttemptRecord] = []
+    try:
+        scene_key = SCENE_INPAINT if mode == "inpaint" else model_key
+        primary_config, backup_config = resolve_scene_generation_configs(db, scene_key)
+        configs_to_try: list[tuple[ExternalApiConfig, bool]] = [(primary_config, False)]
+        if backup_config is not None:
+            configs_to_try.append((backup_config, True))
+
+        last_error_message = ""
+        last_http_status: int | None = None
+        for attempt_index, (config, is_fallback) in enumerate(configs_to_try, start=1):
+            result, error_message, http_status_code, duration_ms = _call_generation_api_once(
+                db,
+                config=config,
+                scene_key=scene_key,
+                prompt=prompt,
+                aspect_ratio=aspect_ratio,
+                image_size=image_size,
+                custom_size=custom_size,
+                reference_images=reference_images,
+                mode=mode,
+                source_image=source_image,
+                mask_image=mask_image,
+            )
+            attempts.append(ApiAttemptRecord(
+                api_config_id=config.id,
+                api_config_name=config.name or "",
+                attempt_index=attempt_index,
+                is_fallback=is_fallback,
+                status="success" if result else "failed",
+                http_status=http_status_code,
+                error_message="" if result else _clip_error_message(error_message),
+                duration_ms=duration_ms,
+            ))
+            if result:
+                return ApiCallResult(
+                    result=result,
+                    error_message="",
+                    http_status_code=None,
+                    attempts=attempts,
+                )
+
+            last_error_message = _clip_error_message(error_message or "生图失败")
+            last_http_status = http_status_code
+            if is_fallback or backup_config is None or not _should_use_fallback_api(http_status_code, last_error_message):
+                break
+
+        return ApiCallResult(
+            result=None,
+            error_message=last_error_message,
+            http_status_code=last_http_status,
+            attempts=attempts,
+        )
     finally:
         db.close()
 
@@ -538,6 +770,34 @@ def _mark_generation_failure(image: Image, error_message: str) -> None:
     image.image_size_bytes = 0
     image.status = "failed"
     image.error_message = _clip_error_message(error_message or "生图失败")
+
+
+def _record_api_attempts(
+    db,
+    *,
+    task: Task,
+    image: Image,
+    image_index: int,
+    attempts: list[ApiAttemptRecord],
+) -> None:
+    if not attempts:
+        return
+    for attempt in attempts:
+        db.add(TaskApiAttempt(
+            task_id=task.id,
+            image_id=image.id,
+            image_index=image_index,
+            api_config_id=attempt.api_config_id,
+            api_config_name=attempt.api_config_name or "",
+            attempt_index=attempt.attempt_index,
+            is_fallback=bool(attempt.is_fallback),
+            status=attempt.status or "failed",
+            http_status=attempt.http_status,
+            error_message=_clip_error_message(attempt.error_message),
+            duration_ms=attempt.duration_ms,
+        ))
+    if any(attempt.is_fallback for attempt in attempts):
+        task.used_fallback_api = True
 
 
 def _parse_reference_images(task: Task) -> list[str]:
@@ -757,6 +1017,9 @@ def _process_task(task_id: int, *, use_distributed_lock: bool = True):
         )
 
         images = db.query(Image).filter(Image.task_id == task_id).all()
+        image_index_map = {
+            item.id: index for index, item in enumerate(sorted(images, key=lambda current: current.id), start=1)
+        }
         pending_images = [image for image in images if image.status == "pending"]
         if not pending_images:
             task.status = _resolve_task_status(images)
@@ -796,7 +1059,7 @@ def _process_task(task_id: int, *, use_distributed_lock: bool = True):
             api_mask_image = task.mask_image or ""
             # Release the checked-out DB connection while the external AI call is in flight.
             db.commit()
-            result, error_message, _http_status_code = _call_gemini_api(
+            call_result = _call_gemini_api(
                 prompt=api_prompt,
                 aspect_ratio=api_aspect_ratio,
                 image_size=api_image_size,
@@ -808,10 +1071,17 @@ def _process_task(task_id: int, *, use_distributed_lock: bool = True):
                 mask_image=api_mask_image,
             )
             _mark_task_request_finished(task)
+            _record_api_attempts(
+                db,
+                task=task,
+                image=image,
+                image_index=image_index_map.get(image.id, 1),
+                attempts=call_result.attempts,
+            )
             db.commit()
 
-            if result:
-                img_bytes, mime = result
+            if call_result.result:
+                img_bytes, mime = call_result.result
                 image.preview_url = _save_preview_image(img_bytes, mime)
                 image.image_url = ""
                 image.image_format = _derive_image_format(mime)
@@ -833,7 +1103,7 @@ def _process_task(task_id: int, *, use_distributed_lock: bool = True):
                     all_success = image.status == "success" and all_success
                     db.commit()
             else:
-                _mark_generation_failure(image, error_message)
+                _mark_generation_failure(image, call_result.error_message)
                 task.error_message = image.error_message
                 all_success = False
                 db.commit()
@@ -905,6 +1175,10 @@ def _process_single_image(image_id: int, *, use_distributed_lock: bool = True):
             _mark_generation_failure(image, "关联任务不存在")
             db.commit()
             return
+        image_index_map = {
+            task_image.id: index
+            for index, task_image in enumerate(sorted(task.images, key=lambda current: current.id), start=1)
+        }
         if _expire_processing_task(db, task, [image]):
             return
 
@@ -931,7 +1205,7 @@ def _process_single_image(image_id: int, *, use_distributed_lock: bool = True):
         api_mask_image = task.mask_image or ""
         # Release the checked-out DB connection while the external AI call is in flight.
         db.commit()
-        result, error_message, _http_status_code = _call_gemini_api(
+        call_result = _call_gemini_api(
             prompt=api_prompt,
             aspect_ratio=api_aspect_ratio,
             image_size=api_image_size,
@@ -943,10 +1217,17 @@ def _process_single_image(image_id: int, *, use_distributed_lock: bool = True):
             mask_image=api_mask_image,
         )
         _mark_task_request_finished(task)
+        _record_api_attempts(
+            db,
+            task=task,
+            image=image,
+            image_index=image_index_map.get(image.id, 1),
+            attempts=call_result.attempts,
+        )
         db.commit()
 
-        if result:
-            img_bytes, mime = result
+        if call_result.result:
+            img_bytes, mime = call_result.result
             image.preview_url = _save_preview_image(img_bytes, mime)
             image.image_url = ""
             image.image_format = _derive_image_format(mime)
@@ -982,7 +1263,7 @@ def _process_single_image(image_id: int, *, use_distributed_lock: bool = True):
                     log.new_image_url = image.image_url
                 db.commit()
         else:
-            _mark_generation_failure(image, error_message)
+            _mark_generation_failure(image, call_result.error_message)
             db.commit()
 
         db.refresh(task)

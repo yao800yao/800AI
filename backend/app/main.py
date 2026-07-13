@@ -100,6 +100,7 @@ def on_startup():
     _ensure_prompt_history_columns()
     _ensure_image_required_columns()
     _ensure_task_credit_cost_column()
+    _ensure_task_api_attempt_schema()
     _ensure_external_api_config_required_columns()
     _ensure_scene_binding_required_columns()
     _ensure_template_required_columns()
@@ -1061,6 +1062,7 @@ def _ensure_task_credit_cost_column():
         and "request_started_at" in task_columns
         and "request_finished_at" in task_columns
         and "source" in task_columns
+        and "used_fallback_api" in task_columns
     ):
         return
 
@@ -1077,6 +1079,46 @@ def _ensure_task_credit_cost_column():
             conn.execute(text("ALTER TABLE tasks ADD COLUMN request_finished_at DATETIME"))
         if "source" not in task_columns:
             conn.execute(text("ALTER TABLE tasks ADD COLUMN source VARCHAR(20) DEFAULT 'web'"))
+        if "used_fallback_api" not in task_columns:
+            conn.execute(text("ALTER TABLE tasks ADD COLUMN used_fallback_api BOOLEAN NOT NULL DEFAULT 0"))
+        conn.execute(text("UPDATE tasks SET used_fallback_api = 0 WHERE used_fallback_api IS NULL"))
+
+
+def _ensure_task_api_attempt_schema():
+    inspector = inspect(engine)
+    table_names = set(inspector.get_table_names())
+    if "tasks" not in table_names:
+        return
+    if "task_api_attempts" not in table_names:
+        from app.models.task_api_attempt import TaskApiAttempt
+
+        TaskApiAttempt.__table__.create(bind=engine)
+        inspector = inspect(engine)
+
+    attempt_columns = {col["name"] for col in inspector.get_columns("task_api_attempts")}
+    with engine.begin() as conn:
+        if "image_id" not in attempt_columns:
+            conn.execute(text("ALTER TABLE task_api_attempts ADD COLUMN image_id INTEGER NULL"))
+        if "image_index" not in attempt_columns:
+            conn.execute(text("ALTER TABLE task_api_attempts ADD COLUMN image_index INTEGER NULL"))
+        if "api_config_id" not in attempt_columns:
+            conn.execute(text("ALTER TABLE task_api_attempts ADD COLUMN api_config_id INTEGER NULL"))
+        if "api_config_name" not in attempt_columns:
+            conn.execute(text("ALTER TABLE task_api_attempts ADD COLUMN api_config_name VARCHAR(100) NOT NULL DEFAULT ''"))
+        if "attempt_index" not in attempt_columns:
+            conn.execute(text("ALTER TABLE task_api_attempts ADD COLUMN attempt_index INTEGER NOT NULL DEFAULT 1"))
+        if "is_fallback" not in attempt_columns:
+            conn.execute(text("ALTER TABLE task_api_attempts ADD COLUMN is_fallback BOOLEAN NOT NULL DEFAULT 0"))
+        if "status" not in attempt_columns:
+            conn.execute(text("ALTER TABLE task_api_attempts ADD COLUMN status VARCHAR(20) NOT NULL DEFAULT 'failed'"))
+        if "http_status" not in attempt_columns:
+            conn.execute(text("ALTER TABLE task_api_attempts ADD COLUMN http_status INTEGER NULL"))
+        if "error_message" not in attempt_columns:
+            conn.execute(text("ALTER TABLE task_api_attempts ADD COLUMN error_message TEXT"))
+        if "duration_ms" not in attempt_columns:
+            conn.execute(text("ALTER TABLE task_api_attempts ADD COLUMN duration_ms INTEGER NULL"))
+        if "created_at" not in attempt_columns:
+            conn.execute(text("ALTER TABLE task_api_attempts ADD COLUMN created_at DATETIME DEFAULT CURRENT_TIMESTAMP"))
 
 
 def _ensure_external_api_config_required_columns():
@@ -1126,6 +1168,8 @@ def _ensure_scene_binding_required_columns():
             conn.execute(text("ALTER TABLE external_api_scene_bindings ADD COLUMN resolution_mapping_json TEXT"))
         if "resolution_credit_costs_json" not in scene_binding_columns:
             conn.execute(text("ALTER TABLE external_api_scene_bindings ADD COLUMN resolution_credit_costs_json TEXT"))
+        if "backup_api_config_id" not in scene_binding_columns:
+            conn.execute(text("ALTER TABLE external_api_scene_bindings ADD COLUMN backup_api_config_id INTEGER"))
         conn.execute(
             text(
                 """

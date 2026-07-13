@@ -2,7 +2,10 @@ import client from "./client";
 import type {
   AdminStats,
   AdminAnalyticsBreakdown,
+  AdminErrorCategoryTimeseries,
   AdminErrorAnalytics,
+  AdminErrorTaskList,
+  ErrorTrendGranularity,
   AdminAnalyticsQuery,
   AdminAnalyticsRedeemRevenue,
   AdminAnalyticsSummary,
@@ -181,7 +184,7 @@ export function getAdminHistoryDetail(payload: {
 export function getAdminHistoryCards(
   page: number = 1,
   pageSize: number = 20,
-  filters: Pick<HistoryFilter, "mode" | "source" | "model" | "prompt" | "status" | "user_id" | "start_date" | "end_date" | "include_prompt_reverse"> = {},
+  filters: Pick<HistoryFilter, "mode" | "source" | "model" | "prompt" | "status" | "user_id" | "start_date" | "end_date" | "include_prompt_reverse" | "used_fallback_api"> = {},
 ): Promise<{ total: number; items: UserHistoryCard[] }> {
   return client.get("/admin/history/cards", {
     params: {
@@ -194,6 +197,7 @@ export function getAdminHistoryCards(
       prompt: filters.prompt?.trim() || undefined,
       status: filters.status,
       user_id: filters.user_id,
+      used_fallback_api: filters.used_fallback_api,
       start_date: filters.start_date,
       end_date: filters.end_date,
     },
@@ -261,8 +265,33 @@ export function getAdminErrorAnalytics(params: {
   start_date?: string;
   end_date?: string;
   model?: string;
+  error_category?: string;
+  used_fallback_api?: boolean;
 }): Promise<AdminErrorAnalytics> {
   return client.get("/admin/analytics/errors", { params });
+}
+
+export function getAdminErrorCategoryTimeseries(query: {
+  granularity: ErrorTrendGranularity;
+  start_date?: string;
+  end_date?: string;
+  model?: string;
+  used_fallback_api?: boolean;
+  limit?: number;
+}): Promise<AdminErrorCategoryTimeseries> {
+  return client.get("/admin/analytics/errors/timeseries", { params: query });
+}
+
+export function getAdminErrorTasks(params: {
+  page?: number;
+  page_size?: number;
+  start_date?: string;
+  end_date?: string;
+  model?: string;
+  error_category?: string;
+  used_fallback_api?: boolean;
+}): Promise<AdminErrorTaskList> {
+  return client.get("/admin/analytics/errors/tasks", { params });
 }
 
 export function getAdminConfig(): Promise<AdminConfig | null> {
@@ -368,6 +397,7 @@ export function updateExternalApiSceneBinding(
   sceneKey: ExternalApiSceneBinding["scene_key"],
   payload: {
     api_config_id: number | null;
+    backup_api_config_id: number | null;
     credit_cost: number;
     resolution_credit_costs_json: string;
     display_name: string;

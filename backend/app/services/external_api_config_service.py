@@ -412,6 +412,7 @@ def _resolve_scene_copy(binding: ExternalApiSceneBinding) -> tuple[str, str]:
 def _serialize_scene_binding(
     binding: ExternalApiSceneBinding,
     config: ExternalApiConfig | None,
+    backup_config: ExternalApiConfig | None = None,
 ) -> ExternalApiSceneBindingOut:
     scene_label, scene_description = _resolve_scene_copy(binding)
     aspect_ratio_options_json, image_size_options_json, custom_size_options_json = _get_scene_option_json(
@@ -437,6 +438,10 @@ def _serialize_scene_binding(
         api_config_name=config.name if config else "",
         api_group_name=config.group_name if config else "",
         api_status=config.status if config else None,
+        backup_api_config_id=backup_config.id if backup_config else None,
+        backup_api_config_name=backup_config.name if backup_config else "",
+        backup_api_group_name=backup_config.group_name if backup_config else "",
+        backup_api_status=backup_config.status if backup_config else None,
         credit_cost=binding.credit_cost,
         max_reference_images=max(0, int(binding.max_reference_images or 0)),
         aspect_ratio_options_json=aspect_ratio_options_json,
@@ -545,6 +550,11 @@ def delete_config(db: Session, config_id: int) -> None:
         .filter(ExternalApiSceneBinding.api_config_id == config.id)
         .update({"api_config_id": None}, synchronize_session=False)
     )
+    (
+        db.query(ExternalApiSceneBinding)
+        .filter(ExternalApiSceneBinding.backup_api_config_id == config.id)
+        .update({"backup_api_config_id": None}, synchronize_session=False)
+    )
     db.delete(config)
     db.commit()
 
@@ -559,9 +569,40 @@ def list_scene_bindings(db: Session) -> list[ExternalApiSceneBindingOut]:
     )
     configs = {row.id: row for row in db.query(ExternalApiConfig).all()}
     return [
-        _serialize_scene_binding(binding, configs.get(binding.api_config_id) if binding.api_config_id else None)
+        _serialize_scene_binding(
+            binding,
+            configs.get(binding.api_config_id) if binding.api_config_id else None,
+            configs.get(binding.backup_api_config_id) if binding.backup_api_config_id else None,
+        )
         for binding in bindings
     ]
+
+
+def _validate_enabled_binding_config(
+    db: Session,
+    config_id: int | None,
+    *,
+    field_label: str,
+) -> ExternalApiConfig | None:
+    if config_id is None:
+        return None
+    config = get_config_or_404(db, config_id)
+    if config.status != "enabled":
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"只能绑定启用状态的{field_label}")
+    return config
+
+
+def _validate_scene_binding_configs(
+    db: Session,
+    *,
+    api_config_id: int | None,
+    backup_api_config_id: int | None,
+) -> tuple[ExternalApiConfig | None, ExternalApiConfig | None]:
+    if api_config_id is not None and backup_api_config_id is not None and api_config_id == backup_api_config_id:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="主接口和备用接口不能绑定同一个接口")
+    primary_config = _validate_enabled_binding_config(db, api_config_id, field_label="主接口")
+    backup_config = _validate_enabled_binding_config(db, backup_api_config_id, field_label="备用接口")
+    return primary_config, backup_config
 
 
 def list_public_task_scene_configs(db: Session) -> list[TaskSceneConfigOut]:
@@ -601,10 +642,11 @@ def create_scene_binding(
     if not body.scene_label.strip():
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="场景名称不能为空")
 
-    if body.api_config_id is not None:
-        config = get_config_or_404(db, body.api_config_id)
-        if config.status != "enabled":
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="只能绑定启用状态的接口")
+    primary_config, backup_config = _validate_scene_binding_configs(
+        db,
+        api_config_id=body.api_config_id,
+        backup_api_config_id=body.backup_api_config_id,
+    )
 
     binding = ExternalApiSceneBinding(
         scene_key=body.scene_key,
@@ -617,6 +659,7 @@ def create_scene_binding(
         hide_custom_size=body.hide_custom_size,
         status=body.status,
         api_config_id=body.api_config_id,
+        backup_api_config_id=body.backup_api_config_id,
         display_name=body.display_name,
         subtitle=body.subtitle,
         credit_cost=body.credit_cost,
@@ -629,8 +672,7 @@ def create_scene_binding(
     )
     db.add(binding)
     db.commit()
-    config = get_config_or_404(db, body.api_config_id) if body.api_config_id else None
-    return _serialize_scene_binding(binding, config)
+    return _serialize_scene_binding(binding, primary_config, backup_config)
 
 
 def _require_custom_scene_binding(db: Session, scene_key: str) -> ExternalApiSceneBinding:
@@ -667,19 +709,20 @@ def set_scene_binding(
     if not binding:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="调用场景不存在")
 
-    if body.api_config_id is not None:
-        config = get_config_or_404(db, body.api_config_id)
-        if config.status != "enabled":
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="只能绑定启用状态的接口")
+    primary_config, backup_config = _validate_scene_binding_configs(
+        db,
+        api_config_id=body.api_config_id,
+        backup_api_config_id=body.backup_api_config_id,
+    )
 
     binding.api_config_id = body.api_config_id
+    binding.backup_api_config_id = body.backup_api_config_id
     binding.display_name = body.display_name
     binding.subtitle = body.subtitle
     binding.credit_cost = body.credit_cost
     binding.resolution_credit_costs_json = body.resolution_credit_costs_json
     db.commit()
-    config = get_config_or_404(db, body.api_config_id) if body.api_config_id else None
-    return _serialize_scene_binding(binding, config)
+    return _serialize_scene_binding(binding, primary_config, backup_config)
 
 
 def update_scene_binding_meta(
@@ -714,7 +757,8 @@ def update_scene_binding_meta(
     binding.resolution_credit_costs_json = body.resolution_credit_costs_json
     db.commit()
     config = get_config_or_404(db, binding.api_config_id) if binding.api_config_id else None
-    return _serialize_scene_binding(binding, config)
+    backup_config = get_config_or_404(db, binding.backup_api_config_id) if binding.backup_api_config_id else None
+    return _serialize_scene_binding(binding, config, backup_config)
 
 
 def set_scene_binding_status(
@@ -726,7 +770,8 @@ def set_scene_binding_status(
     binding.status = body.status
     db.commit()
     config = get_config_or_404(db, binding.api_config_id) if binding.api_config_id else None
-    return _serialize_scene_binding(binding, config)
+    backup_config = get_config_or_404(db, binding.backup_api_config_id) if binding.backup_api_config_id else None
+    return _serialize_scene_binding(binding, config, backup_config)
 
 
 def delete_scene_binding(db: Session, scene_key: str) -> None:
@@ -735,6 +780,7 @@ def delete_scene_binding(db: Session, scene_key: str) -> None:
         binding.is_deleted = True
         binding.status = "disabled"
         binding.api_config_id = None
+        binding.backup_api_config_id = None
         db.commit()
         return
     db.delete(binding)
@@ -763,6 +809,14 @@ def get_scene_credit_cost(db: Session, scene_key: str, resolution: str = "") -> 
 
 
 def require_scene_config(db: Session, scene_key: str) -> ExternalApiConfig:
+    config, _backup_config = resolve_scene_generation_configs(db, scene_key)
+    return config
+
+
+def resolve_scene_generation_configs(
+    db: Session,
+    scene_key: str,
+) -> tuple[ExternalApiConfig, ExternalApiConfig | None]:
     _ensure_scene_bindings(db)
     binding = (
         db.query(ExternalApiSceneBinding)
@@ -790,7 +844,15 @@ def require_scene_config(db: Session, scene_key: str) -> ExternalApiConfig:
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"场景 {scene_key} 当前绑定的接口已停用，请联系超级管理员调整绑定",
         )
-    return config
+    backup_config: ExternalApiConfig | None = None
+    if binding.backup_api_config_id and binding.backup_api_config_id != binding.api_config_id:
+        try:
+            candidate = get_config_or_404(db, binding.backup_api_config_id)
+        except HTTPException:
+            candidate = None
+        if candidate and candidate.status == "enabled":
+            backup_config = candidate
+    return config, backup_config
 
 
 def render_config(config: ExternalApiConfig, variables: dict[str, Any]) -> RenderedExternalApiConfig:

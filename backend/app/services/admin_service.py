@@ -2,11 +2,13 @@ from calendar import monthrange
 from collections import defaultdict
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
+import re
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 from fastapi import HTTPException, status
 from app.models.user import User
 from app.models.task import Task
+from app.models.task_api_attempt import TaskApiAttempt
 from app.models.credit_log import CreditLog
 from app.models.credit_redeem_key import CreditRedeemKey
 from app.models.payment_order import PaymentOrder
@@ -16,7 +18,7 @@ from app.services.prompt_reverse_service import (
     PROMPT_REVERSE_MODE,
     PROMPT_REVERSE_MODEL,
 )
-from app.services.task_service import ENQUEUE_FAILURE_DESCRIPTION, TASK_FAILURE_REFUND_DESCRIPTION
+from app.services.task_service import ENQUEUE_FAILURE_DESCRIPTION, TASK_FAILURE_REFUND_DESCRIPTION, is_task_generation_failure_credit_refunded
 from app.services.task_type_service import (
     TASK_TYPE_IMAGE_EDIT,
     TASK_TYPE_INPAINT,
@@ -571,6 +573,27 @@ def _end_of_day(value: datetime) -> datetime:
     return value.replace(hour=23, minute=59, second=59, microsecond=999999)
 
 
+_HOUR_GRANULARITY_BUCKETS = {
+    "1hour": 1,
+    "3hour": 3,
+    "6hour": 6,
+}
+
+
+def _hour_bucket_size(granularity: str) -> int | None:
+    return _HOUR_GRANULARITY_BUCKETS.get(granularity)
+
+
+def _start_of_hour_bucket(value: datetime, hours: int) -> datetime:
+    value = _to_local_datetime(value)
+    return value.replace(hour=(value.hour // hours) * hours, minute=0, second=0, microsecond=0)
+
+
+def _end_of_hour_bucket(value: datetime, hours: int) -> datetime:
+    start = _start_of_hour_bucket(value, hours)
+    return start + timedelta(hours=hours) - timedelta(microseconds=1)
+
+
 def _start_of_week(value: datetime) -> datetime:
     value = _start_of_day(value)
     return value - timedelta(days=value.weekday())
@@ -601,6 +624,8 @@ def _end_of_month(value: datetime) -> datetime:
 
 
 def _format_range_label(start: datetime, end: datetime) -> str:
+    if start.date() == end.date():
+        return f"{start.strftime('%Y-%m-%d %H:%M')} ~ {end.strftime('%H:%M')}"
     return f"{start.strftime('%Y-%m-%d')} ~ {end.strftime('%Y-%m-%d')}"
 
 
@@ -611,7 +636,11 @@ def _align_range(
 ) -> tuple[datetime, datetime]:
     now = now_local().replace(tzinfo=LOCAL_TZ)
     if start_date is None or end_date is None:
-        if granularity == "day":
+        hour_bucket_size = _hour_bucket_size(granularity)
+        if hour_bucket_size:
+            end = _end_of_hour_bucket(now, hour_bucket_size)
+            start = _start_of_day(now)
+        elif granularity == "day":
             end = _end_of_day(now)
             start = _start_of_day(now - timedelta(days=6))
         elif granularity == "week":
@@ -622,7 +651,11 @@ def _align_range(
             start = _start_of_month(_shift_months(now, -5))
         return start, end
 
-    if granularity == "day":
+    hour_bucket_size = _hour_bucket_size(granularity)
+    if hour_bucket_size:
+        start = _start_of_hour_bucket(start_date, hour_bucket_size)
+        end = _end_of_hour_bucket(end_date, hour_bucket_size)
+    elif granularity == "day":
         start = _start_of_day(start_date)
         end = _end_of_day(end_date)
     elif granularity == "week":
@@ -642,7 +675,10 @@ def _iter_bucket_starts(start: datetime, end: datetime, granularity: str) -> lis
     cursor = start
     while cursor <= end:
         buckets.append(cursor)
-        if granularity == "day":
+        hour_bucket_size = _hour_bucket_size(granularity)
+        if hour_bucket_size:
+            cursor += timedelta(hours=hour_bucket_size)
+        elif granularity == "day":
             cursor += timedelta(days=1)
         elif granularity == "week":
             cursor += timedelta(weeks=1)
@@ -653,7 +689,10 @@ def _iter_bucket_starts(start: datetime, end: datetime, granularity: str) -> lis
 
 def _previous_range(start: datetime, end: datetime, granularity: str) -> tuple[datetime, datetime]:
     bucket_count = len(_iter_bucket_starts(start, end, granularity))
-    if granularity == "day":
+    hour_bucket_size = _hour_bucket_size(granularity)
+    if hour_bucket_size:
+        previous_start = start - timedelta(hours=hour_bucket_size * bucket_count)
+    elif granularity == "day":
         previous_start = start - timedelta(days=bucket_count)
     elif granularity == "week":
         previous_start = start - timedelta(weeks=bucket_count)
@@ -664,6 +703,9 @@ def _previous_range(start: datetime, end: datetime, granularity: str) -> tuple[d
 
 
 def _bucket_start(value: datetime, granularity: str) -> datetime:
+    hour_bucket_size = _hour_bucket_size(granularity)
+    if hour_bucket_size:
+        return _start_of_hour_bucket(value, hour_bucket_size)
     if granularity == "day":
         return _start_of_day(value)
     if granularity == "week":
@@ -672,6 +714,9 @@ def _bucket_start(value: datetime, granularity: str) -> datetime:
 
 
 def _bucket_end(value: datetime, granularity: str) -> datetime:
+    hour_bucket_size = _hour_bucket_size(granularity)
+    if hour_bucket_size:
+        return _end_of_hour_bucket(value, hour_bucket_size)
     if granularity == "day":
         return _end_of_day(value)
     if granularity == "week":
@@ -680,6 +725,8 @@ def _bucket_end(value: datetime, granularity: str) -> datetime:
 
 
 def _bucket_label(value: datetime, granularity: str) -> str:
+    if _hour_bucket_size(granularity):
+        return value.strftime("%m-%d %H:%M")
     if granularity == "day":
         return value.strftime("%m-%d")
     if granularity == "week":
@@ -1260,6 +1307,7 @@ INVALID_REFERENCE_IMAGE_ERROR_MESSAGE = (
     'If you believe this is an error, contact us at ***.***.com and include the request ID.\\"}",'
     '"type":"upstream_error","param":"","code":"provider_request_invalid"}}'
 )
+UPSTREAM_HTTP_STATUS_PATTERN = re.compile(r"生图接口返回 http\s+(\d{3})", re.IGNORECASE)
 
 
 def _normalize_error_message_for_analytics(error_message: str | None) -> str:
@@ -1274,44 +1322,484 @@ def _normalize_error_message_for_analytics(error_message: str | None) -> str:
     return message
 
 
+def _classify_upstream_http_error(message: str, lower: str) -> str | None:
+    matched = UPSTREAM_HTTP_STATUS_PATTERN.search(message)
+    if not matched:
+        return None
+
+    status_code = int(matched.group(1))
+    if "provider_request_invalid" in lower or "bad request to openai" in lower:
+        return "上游 HTTP 400-请求参数无效"
+    if "invalid image file or mode" in lower:
+        return "上游 HTTP 400-参考图无效"
+    if "rate limit" in lower or "too many requests" in lower:
+        return "上游 HTTP 429-限流"
+    if "unauthorized" in lower or "invalid api key" in lower or "authentication" in lower:
+        return "上游 HTTP 401-鉴权失败"
+    if "forbidden" in lower or "permission" in lower:
+        return "上游 HTTP 403-权限不足"
+    if "not found" in lower or "model_not_found" in lower:
+        return "上游 HTTP 404-资源不存在"
+    if "timeout" in lower:
+        return f"上游 HTTP {status_code}-超时"
+    if "payload too large" in lower or "request entity too large" in lower:
+        return "上游 HTTP 413-请求体过大"
+    if "unprocessable" in lower or "validation" in lower:
+        return "上游 HTTP 422-请求校验失败"
+    if "bad gateway" in lower:
+        return "上游 HTTP 502-网关异常"
+    if "service unavailable" in lower:
+        return "上游 HTTP 503-服务不可用"
+    if "gateway timeout" in lower:
+        return "上游 HTTP 504-网关超时"
+    status_map = {
+        400: "上游 HTTP 400-请求错误",
+        401: "上游 HTTP 401-鉴权失败",
+        403: "上游 HTTP 403-权限不足",
+        404: "上游 HTTP 404-资源不存在",
+        408: "上游 HTTP 408-请求超时",
+        409: "上游 HTTP 409-状态冲突",
+        413: "上游 HTTP 413-请求体过大",
+        422: "上游 HTTP 422-请求校验失败",
+        429: "上游 HTTP 429-限流",
+        500: "上游 HTTP 500-服务内部错误",
+        502: "上游 HTTP 502-网关异常",
+        503: "上游 HTTP 503-服务不可用",
+        504: "上游 HTTP 504-网关超时",
+    }
+    if status_code in status_map:
+        return status_map[status_code]
+    if 400 <= status_code < 500:
+        return f"上游 HTTP {status_code}-客户端错误"
+    if 500 <= status_code < 600:
+        return f"上游 HTTP {status_code}-服务端错误"
+    return f"上游 HTTP {status_code}-其他错误"
+
+
+def _classify_error_message_for_analytics(error_message: str | None) -> str:
+    message = _normalize_error_message_for_analytics(error_message)
+    lower = message.lower()
+
+    if "生图接口连接被上游异常断开" in message:
+        return "上游异常断开连接"
+    if "生图接口连接超时" in message:
+        return "上游连接超时"
+    if "生图接口响应读取超时" in message:
+        return "上游响应读取超时"
+    if "生图接口请求发送超时" in message:
+        return "上游请求发送超时"
+    if "生图接口连接池等待超时" in message:
+        return "连接池等待超时"
+    if "生图接口请求超时" in message:
+        return "上游请求超时"
+    if "生图接口连接失败" in message:
+        return "上游连接失败"
+    if "生图接口响应读取失败" in message:
+        return "上游响应读取失败"
+    if "生图接口请求发送失败" in message:
+        return "上游请求发送失败"
+    if "生图接口连接关闭异常" in message:
+        return "连接关闭异常"
+    if "生图接口协议异常" in message:
+        return "上游协议异常"
+    if "生图接口网络异常" in message:
+        return "上游网络异常"
+    if "invalid image file or mode" in lower or "provider_request_invalid" in lower:
+        return "参考图无效"
+    if "生图接口返回内容缺少配置路径" in message and "对应的 base64 数据" in message:
+        return "上游返回缺少图片数据"
+    upstream_http_category = _classify_upstream_http_error(message, lower)
+    if upstream_http_category:
+        return upstream_http_category
+    if "图片已生成，但保存结果失败" in message:
+        return "结果图片保存失败"
+    if "图编辑原图不存在或无法读取" in message:
+        return "图编辑原图不可读"
+    if "图编辑蒙版不存在或无法读取" in message:
+        return "图编辑蒙版不可读"
+    if "图编辑原图格式无效" in message:
+        return "图编辑原图格式无效"
+    if "图编辑蒙版格式无效" in message:
+        return "图编辑蒙版格式无效"
+    if "任务处理超时" in message:
+        return "任务处理超时"
+    if "任务队列暂不可用" in message or "任务入队失败" in message:
+        return "任务入队异常"
+    if "生图任务执行异常" in message or "重新生成任务执行异常" in message:
+        return "任务执行异常"
+    if "关联任务不存在" in message:
+        return "关联任务不存在"
+    if "生图失败" in message:
+        return "生图失败"
+    return "其他错误"
+
+
+def _load_task_attempts_map(db: Session, task_ids: list[int]) -> dict[int, list[TaskApiAttempt]]:
+    normalized_task_ids = [int(task_id) for task_id in task_ids if task_id]
+    if not normalized_task_ids:
+        return {}
+    rows = (
+        db.query(TaskApiAttempt)
+        .filter(TaskApiAttempt.task_id.in_(normalized_task_ids))
+        .order_by(
+            TaskApiAttempt.task_id.asc(),
+            TaskApiAttempt.image_index.asc(),
+            TaskApiAttempt.attempt_index.asc(),
+            TaskApiAttempt.id.asc(),
+        )
+        .all()
+    )
+    attempts_map: dict[int, list[TaskApiAttempt]] = defaultdict(list)
+    for row in rows:
+        attempts_map[int(row.task_id)].append(row)
+    return dict(attempts_map)
+
+
+def _join_attempt_api_names(attempts: list[TaskApiAttempt]) -> str:
+    names: list[str] = []
+    seen_names: set[str] = set()
+    for attempt in attempts:
+        name = (attempt.api_config_name or "").strip()
+        if not name or name in seen_names:
+            continue
+        seen_names.add(name)
+        names.append(name)
+    return "、".join(names)
+
+
+def _summarize_task_attempts_for_error_row(
+    attempts: list[TaskApiAttempt],
+    *,
+    error_category: str | None = None,
+) -> dict | None:
+    primary_failed_attempts = [
+        attempt
+        for attempt in attempts
+        if not attempt.is_fallback and (attempt.status or "failed") == "failed"
+    ]
+    if not primary_failed_attempts:
+        return None
+
+    matched_primary: TaskApiAttempt | None = None
+    for attempt in primary_failed_attempts:
+        row_error_category = _classify_error_message_for_analytics(attempt.error_message)
+        if error_category and row_error_category != error_category:
+            continue
+        matched_primary = attempt
+        break
+    if matched_primary is None:
+        return None
+
+    fallback_attempts = [attempt for attempt in attempts if attempt.is_fallback]
+    fallback_success_attempts = [
+        attempt for attempt in fallback_attempts if (attempt.status or "failed") == "success"
+    ]
+    fallback_failed_attempts = [
+        attempt for attempt in fallback_attempts if (attempt.status or "failed") != "success"
+    ]
+    if not fallback_attempts:
+        fallback_status = "unused"
+    elif fallback_success_attempts and fallback_failed_attempts:
+        fallback_status = "partial"
+    elif fallback_success_attempts:
+        fallback_status = "success"
+    else:
+        fallback_status = "failed"
+
+    fallback_error_message = next(
+        (
+            (attempt.error_message or "").strip()
+            for attempt in fallback_failed_attempts
+            if (attempt.error_message or "").strip()
+        ),
+        "",
+    )
+    return {
+        "primary_api_config_name": (matched_primary.api_config_name or "").strip(),
+        "primary_http_status": matched_primary.http_status,
+        "primary_error_message": (matched_primary.error_message or "").strip(),
+        "fallback_api_config_name": _join_attempt_api_names(fallback_attempts),
+        "fallback_status": fallback_status,
+        "fallback_error_message": fallback_error_message,
+    }
+
+
 def get_error_analytics(
     db: Session,
     *,
     start_date: datetime | None = None,
     end_date: datetime | None = None,
     model: str | None = None,
+    error_category: str | None = None,
+    used_fallback_api: bool | None = None,
 ) -> dict:
     current_start, current_end = _align_range("day", start_date, end_date)
-    query = (
-        db.query(Task.error_message)
-        .join(User, User.id == Task.user_id)
-        .filter(
-            Task.created_at >= _to_db_datetime(current_start),
-            Task.created_at <= _to_db_datetime(current_end),
-            Task.status == "failed",
-            User.role != "superadmin",
-            _non_whitelisted_user_filter(),
+    fallback_task_total = 0
+    fallback_success_tasks = 0
+    fallback_failed_tasks = 0
+    if used_fallback_api is True:
+        query = (
+            db.query(Task.id, Task.status, TaskApiAttempt.error_message)
+            .join(Task, Task.id == TaskApiAttempt.task_id)
+            .join(User, User.id == Task.user_id)
+            .filter(
+                Task.created_at >= _to_db_datetime(current_start),
+                Task.created_at <= _to_db_datetime(current_end),
+                Task.used_fallback_api.is_(True),
+                TaskApiAttempt.is_fallback.is_(False),
+                TaskApiAttempt.status == "failed",
+                User.role != "superadmin",
+                _non_whitelisted_user_filter(),
+            )
         )
-    )
+    else:
+        query = (
+            db.query(Task.error_message)
+            .join(User, User.id == Task.user_id)
+            .filter(
+                Task.created_at >= _to_db_datetime(current_start),
+                Task.created_at <= _to_db_datetime(current_end),
+                Task.status == "failed",
+                User.role != "superadmin",
+                _non_whitelisted_user_filter(),
+            )
+        )
+        if used_fallback_api is False:
+            query = query.filter(Task.used_fallback_api.is_(False))
     if model:
         query = query.filter(Task.model == model)
     rows = query.all()
 
-    error_count_map: dict[str, int] = defaultdict(int)
+    raw_error_count_map: dict[str, int] = defaultdict(int)
+    category_count_map: dict[str, int] = defaultdict(int)
+    category_sample_map: dict[str, str] = {}
+    filtered_total_failed_tasks = 0
+    matched_fallback_task_status_map: dict[int, str] = {}
     for row in rows:
         normalized_message = _normalize_error_message_for_analytics(row.error_message)
-        error_count_map[normalized_message] += 1
+        row_error_category = _classify_error_message_for_analytics(normalized_message)
+        if error_category is not None and row_error_category != error_category:
+            continue
+        filtered_total_failed_tasks += 1
+        raw_error_count_map[normalized_message] += 1
+        category_count_map[row_error_category] += 1
+        category_sample_map.setdefault(row_error_category, normalized_message)
+        if used_fallback_api is True and row.id is not None:
+            matched_fallback_task_status_map[int(row.id)] = str(row.status or "")
+
+    if used_fallback_api is True:
+        fallback_task_total = len(matched_fallback_task_status_map)
+        fallback_success_tasks = sum(
+            1 for status_value in matched_fallback_task_status_map.values() if status_value == "success"
+        )
+        fallback_failed_tasks = sum(
+            1 for status_value in matched_fallback_task_status_map.values() if status_value == "failed"
+        )
 
     items = [
-        {"error_message": error_message, "count": count}
-        for error_message, count in sorted(
-            error_count_map.items(),
+        {
+            "error_category": item_error_category,
+            "error_message": category_sample_map.get(item_error_category, ""),
+            "count": count,
+        }
+        for item_error_category, count in sorted(
+            category_count_map.items(),
             key=lambda item: (-item[1], item[0]),
         )
     ]
     return {
         "range_label": _format_range_label(current_start, current_end),
-        "total_failed_tasks": len(rows),
-        "distinct_error_messages": len(items),
+        "total_failed_tasks": filtered_total_failed_tasks,
+        "fallback_task_total": fallback_task_total,
+        "fallback_success_tasks": fallback_success_tasks,
+        "fallback_failed_tasks": fallback_failed_tasks,
+        "distinct_error_categories": len(items),
+        "distinct_error_messages": len(raw_error_count_map),
         "items": items,
     }
+
+
+def get_error_category_timeseries(
+    db: Session,
+    *,
+    granularity: str = "day",
+    start_date: datetime | None = None,
+    end_date: datetime | None = None,
+    model: str | None = None,
+    used_fallback_api: bool | None = None,
+    limit: int = 6,
+) -> dict:
+    current_start, current_end = _align_range(granularity, start_date, end_date)
+    bucket_starts = _iter_bucket_starts(current_start, current_end, granularity)
+    if used_fallback_api is True:
+        query = (
+            db.query(Task.created_at, TaskApiAttempt.error_message)
+            .join(Task, Task.id == TaskApiAttempt.task_id)
+            .join(User, User.id == Task.user_id)
+            .filter(
+                Task.created_at >= _to_db_datetime(current_start),
+                Task.created_at <= _to_db_datetime(current_end),
+                Task.used_fallback_api.is_(True),
+                TaskApiAttempt.is_fallback.is_(False),
+                TaskApiAttempt.status == "failed",
+                User.role != "superadmin",
+                _non_whitelisted_user_filter(),
+            )
+        )
+    else:
+        query = (
+            db.query(Task.created_at, Task.error_message)
+            .join(User, User.id == Task.user_id)
+            .filter(
+                Task.created_at >= _to_db_datetime(current_start),
+                Task.created_at <= _to_db_datetime(current_end),
+                Task.status == "failed",
+                User.role != "superadmin",
+                _non_whitelisted_user_filter(),
+            )
+        )
+        if used_fallback_api is False:
+            query = query.filter(Task.used_fallback_api.is_(False))
+    if model:
+        query = query.filter(Task.model == model)
+    rows = query.all()
+
+    category_totals: dict[str, int] = defaultdict(int)
+    bucket_category_counts: dict[datetime, dict[str, int]] = {
+        bucket: defaultdict(int) for bucket in bucket_starts
+    }
+
+    for row in rows:
+        if not row.created_at:
+            continue
+        bucket = _bucket_start(_to_local_datetime(row.created_at), granularity)
+        if bucket not in bucket_category_counts:
+            continue
+        row_error_category = _classify_error_message_for_analytics(row.error_message)
+        category_totals[row_error_category] += 1
+        bucket_category_counts[bucket][row_error_category] += 1
+
+    ranked_categories = sorted(
+        category_totals.items(),
+        key=lambda item: (-item[1], item[0]),
+    )
+    top_categories = [name for name, _count in ranked_categories[:max(limit, 1)]]
+
+    points = []
+    for bucket in bucket_starts:
+        category_counts = bucket_category_counts[bucket]
+        points.append(
+            {
+                "label": _bucket_label(bucket, granularity),
+                "bucket_start": bucket,
+                "bucket_end": _bucket_end(bucket, granularity),
+                "total_failed_tasks": sum(category_counts.values()),
+                "categories": {name: category_counts.get(name, 0) for name in top_categories},
+            }
+        )
+
+    return {
+        "granularity": granularity,
+        "range_label": _format_range_label(current_start, current_end),
+        "series": [
+            {"error_category": name, "total_count": category_totals[name]}
+            for name in top_categories
+        ],
+        "points": points,
+    }
+
+
+def get_error_tasks(
+    db: Session,
+    *,
+    page: int = 1,
+    page_size: int = 20,
+    start_date: datetime | None = None,
+    end_date: datetime | None = None,
+    model: str | None = None,
+    error_category: str | None = None,
+    used_fallback_api: bool | None = None,
+) -> dict:
+    if used_fallback_api is True:
+        query = (
+            db.query(Task, User)
+            .join(User, User.id == Task.user_id)
+            .filter(
+                Task.used_fallback_api.is_(True),
+                User.role != "superadmin",
+                _non_whitelisted_user_filter(),
+            )
+        )
+    else:
+        query = (
+            db.query(Task, User)
+            .join(User, User.id == Task.user_id)
+            .filter(
+                Task.status == "failed",
+                User.role != "superadmin",
+                _non_whitelisted_user_filter(),
+            )
+        )
+        if used_fallback_api is False:
+            query = query.filter(Task.used_fallback_api.is_(False))
+    if start_date:
+        query = query.filter(Task.created_at >= _to_db_datetime(start_date))
+    if end_date:
+        query = query.filter(Task.created_at <= _to_db_datetime(end_date))
+    if model:
+        query = query.filter(Task.model == model)
+
+    rows = query.order_by(Task.created_at.desc(), Task.id.desc()).all()
+    items: list[dict] = []
+    scene_type_map = get_task_scene_type_map(db)
+    attempts_map = _load_task_attempts_map(db, [int(task.id) for task, _user in rows]) if used_fallback_api is True else {}
+    for task, user in rows:
+        attempt_summary = {
+            "primary_api_config_name": "",
+            "primary_http_status": None,
+            "fallback_api_config_name": "",
+            "fallback_status": "unused",
+            "fallback_error_message": "",
+        }
+        if used_fallback_api is True:
+            resolved_summary = _summarize_task_attempts_for_error_row(
+                attempts_map.get(int(task.id), []),
+                error_category=error_category,
+            )
+            if resolved_summary is None:
+                continue
+            attempt_summary = resolved_summary
+            row_error_message = resolved_summary["primary_error_message"] or str(task.error_message or "")
+        else:
+            row_error_message = str(task.error_message or "")
+            normalized_message = _normalize_error_message_for_analytics(row_error_message)
+            row_error_category = _classify_error_message_for_analytics(normalized_message)
+            if error_category and row_error_category != error_category:
+                continue
+        items.append({
+            "task_id": task_external_id(task),
+            "user_id": user_external_id(user),
+            "username": user.username or "",
+            "avatar_url": user.avatar_url or "",
+            "task_type": resolve_task_type_for_task(task, scene_type_map=scene_type_map),
+            "model": task.model or "",
+            "source": task.source or "web",
+            "mode": task.mode or "generate",
+            "prompt": task.prompt or "",
+            "status": task.status or "failed",
+            "error_message": row_error_message or task.error_message or "",
+            "credit_cost": int(task.credit_cost or 0),
+            "credit_refunded": bool(is_task_generation_failure_credit_refunded(db, task.id)) if task.id else False,
+            "used_fallback_api": bool(task.used_fallback_api),
+            "primary_api_config_name": attempt_summary["primary_api_config_name"],
+            "primary_http_status": attempt_summary["primary_http_status"],
+            "fallback_api_config_name": attempt_summary["fallback_api_config_name"],
+            "fallback_status": attempt_summary["fallback_status"],
+            "fallback_error_message": attempt_summary["fallback_error_message"],
+            "created_at": task.created_at,
+        })
+
+    total = len(items)
+    start_index = max(page - 1, 0) * page_size
+    page_items = items[start_index:start_index + page_size]
+    return {"total": total, "items": page_items}

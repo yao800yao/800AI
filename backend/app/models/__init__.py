@@ -4,6 +4,7 @@ from app.models.user_asset import UserAsset
 from app.models.user_prompt_category import UserPromptCategory
 from app.models.user_prompt import UserPrompt
 from app.models.task import Task
+from app.models.task_api_attempt import TaskApiAttempt
 from app.models.image import Image
 from app.models.regenerate_log import RegenerateLog
 from app.models.api_key import ApiKey
@@ -30,6 +31,7 @@ __all__ = [
     "UserPromptCategory",
     "UserPrompt",
     "Task",
+    "TaskApiAttempt",
     "Image",
     "RegenerateLog",
     "ApiKey",

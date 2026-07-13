@@ -18,6 +18,7 @@ class ExternalApiSceneBinding(Base):
     hide_custom_size = Column(Boolean, nullable=False, default=True, server_default="1")
     status = Column(String(20), nullable=False, default="enabled", server_default="enabled")
     api_config_id = Column(Integer, ForeignKey("external_api_configs.id"), nullable=True)
+    backup_api_config_id = Column(Integer, ForeignKey("external_api_configs.id"), nullable=True)
     display_name = Column(String(100), nullable=False, default="", server_default="")
     subtitle = Column(String(255), nullable=False, default="", server_default="")
     credit_cost = Column(Integer, nullable=False, default=0, server_default="0")

@@ -6,7 +6,7 @@ import dayjs from "dayjs";
 import { getDisplayImageUrl, getPreviewImageUrl, resolveImageUrl, resolvePreviewImageUrl } from "@/api/images";
 import { withBaseUrl } from "@/lib/assets";
 import { getTaskImageFailureMessage } from "@/lib/generationErrors";
-import type { ImageResult, UserHistoryCard } from "@/types";
+import type { ImageResult, TaskApiAttempt, UserHistoryCard } from "@/types";
 
 const props = withDefaults(defineProps<{
   open: boolean;
@@ -111,8 +111,31 @@ function detailMetaList(item: UserHistoryCard) {
     item.custom_size ? `自定义分辨率：${item.custom_size}` : "",
     item.image_format ? `格式：${item.image_format}` : "",
     item.image_size_bytes ? `大小：${formatImageSize(item.image_size_bytes)}` : "",
+    item.item_type === "task" && item.api_attempts?.length
+      ? `备用接口：${item.used_fallback_api ? "已调用" : "未调用"}`
+      : "",
     `时间：${formatTime(item.created_at)}`,
   ].filter(Boolean);
+}
+
+function attemptStatusLabel(status: string) {
+  return status === "success" ? "成功" : "失败";
+}
+
+function attemptRoleLabel(attempt: TaskApiAttempt) {
+  return attempt.is_fallback ? "备用接口" : "主接口";
+}
+
+function attemptTargetLabel(attempt: TaskApiAttempt) {
+  if (attempt.image_index && attempt.image_index > 0) return `第 ${attempt.image_index} 张结果图`;
+  if (attempt.image_id) return `图片 #${attempt.image_id}`;
+  return "任务级";
+}
+
+function formatDuration(durationMs?: number | null) {
+  if (typeof durationMs !== "number" || Number.isNaN(durationMs)) return "-";
+  if (durationMs < 1000) return `${durationMs} ms`;
+  return `${(durationMs / 1000).toFixed(2)} s`;
 }
 
 function isHistoryItemExpired(item: Pick<UserHistoryCard, "created_at" | "status">) {
@@ -257,6 +280,32 @@ function handleDownload(item: UserHistoryCard) {
             </div>
           </div>
 
+          <div v-if="item.api_attempts?.length" class="detail-section">
+            <div class="detail-label">接口调用记录</div>
+            <div class="detail-attempt-list">
+              <div v-for="attempt in item.api_attempts" :key="`${attempt.id || 'attempt'}-${attempt.image_id || 0}-${attempt.attempt_index}`" class="detail-attempt-card">
+                <div class="detail-attempt-header">
+                  <span class="detail-attempt-title">{{ attemptTargetLabel(attempt) }}</span>
+                  <a-space size="small">
+                    <a-tag class="api-tag" :class="attempt.is_fallback ? 'api-tag-group' : 'api-tag-muted'">
+                      {{ attemptRoleLabel(attempt) }}
+                    </a-tag>
+                    <a-tag class="api-tag" :class="attempt.status === 'success' ? 'api-tag-enabled' : 'api-tag-danger'">
+                      {{ attemptStatusLabel(attempt.status) }}
+                    </a-tag>
+                  </a-space>
+                </div>
+                <div class="detail-attempt-meta">
+                  <span>第 {{ attempt.attempt_index }} 次尝试</span>
+                  <span>接口：{{ attempt.api_config_name || "-" }}</span>
+                  <span>HTTP：{{ typeof attempt.http_status === "number" ? attempt.http_status : "-" }}</span>
+                  <span>耗时：{{ formatDuration(attempt.duration_ms) }}</span>
+                </div>
+                <div v-if="attempt.error_message" class="detail-attempt-error">{{ attempt.error_message }}</div>
+              </div>
+            </div>
+          </div>
+
           <div v-if="item.mode === 'inpaint' && item.source_image" class="detail-section">
             <div class="detail-label">局部重绘原图</div>
             <div class="detail-thumb-row">
@@ -355,6 +404,53 @@ function handleDownload(item: UserHistoryCard) {
 
 .detail-section + .detail-section {
   margin-top: 18px;
+}
+
+.detail-attempt-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.detail-attempt-card {
+  border: 1px solid var(--border-color);
+  border-radius: 14px;
+  padding: 12px 14px;
+  background: var(--bg-elevated, rgba(255, 255, 255, 0.64));
+}
+
+.detail-attempt-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.detail-attempt-title {
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.detail-attempt-meta {
+  margin-top: 8px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 14px;
+  color: var(--text-secondary);
+  font-size: 13px;
+}
+
+.detail-attempt-error {
+  margin-top: 8px;
+  color: var(--danger-color, #d84f45);
+  font-size: 13px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+}
+
+.api-tag-danger {
+  color: #b42318;
+  background: rgba(217, 45, 32, 0.12);
 }
 
 .detail-layout {

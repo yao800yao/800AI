@@ -250,6 +250,7 @@ class ExternalApiSceneBindingCreate(BaseModel):
     hide_resolution: bool = False
     hide_custom_size: bool = True
     api_config_id: int | None = None
+    backup_api_config_id: int | None = None
     display_name: str = ""
     subtitle: str = ""
     credit_cost: int
@@ -334,6 +335,7 @@ class ExternalApiSceneBindingCreate(BaseModel):
 
 class ExternalApiSceneBindingUpdate(BaseModel):
     api_config_id: int | None = None
+    backup_api_config_id: int | None = None
     display_name: str = ""
     subtitle: str = ""
     credit_cost: int
@@ -459,6 +461,10 @@ class ExternalApiSceneBindingOut(BaseModel):
     api_config_name: str = ""
     api_group_name: str = ""
     api_status: StatusType | None = None
+    backup_api_config_id: int | None = None
+    backup_api_config_name: str = ""
+    backup_api_group_name: str = ""
+    backup_api_status: StatusType | None = None
     credit_cost: int
     max_reference_images: int
     aspect_ratio_options_json: str

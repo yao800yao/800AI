@@ -62,6 +62,7 @@ const typeFilter = ref<TaskType | undefined>(undefined);
 const sourceFilter = ref<TaskSource | undefined>(undefined);
 const modelFilter = ref<string | undefined>(undefined);
 const statusFilter = ref<"pending" | "processing" | "success" | "failed" | undefined>(undefined);
+const fallbackFilter = ref<"used" | undefined>(undefined);
 const userFilter = ref<string | undefined>(
   typeof route.query.user === "string" ? route.query.user : undefined,
 );
@@ -134,6 +135,7 @@ const activeFilterCount = computed(() => {
   if (sourceFilter.value) count += 1;
   if (modelFilter.value) count += 1;
   if (statusFilter.value) count += 1;
+  if (isAdminHistoryView.value && fallbackFilter.value) count += 1;
   if (isAdminHistoryView.value && userFilter.value) count += 1;
   if (promptFilter.value.trim()) count += 1;
   if (dateRangeFilter.value) count += 1;
@@ -198,6 +200,7 @@ function getHistoryQuery() {
     user_id: isAdminHistoryView.value ? userFilter.value : undefined,
     prompt: promptFilter.value,
     status: statusFilter.value,
+    used_fallback_api: isAdminHistoryView.value && fallbackFilter.value === "used" ? true : undefined,
     start_date: dateRangeFilter.value?.[0].startOf("day").toISOString(),
     end_date: dateRangeFilter.value?.[1].endOf("day").toISOString(),
   };
@@ -360,6 +363,7 @@ function resetFilters() {
   sourceFilter.value = undefined;
   modelFilter.value = undefined;
   statusFilter.value = undefined;
+  fallbackFilter.value = undefined;
   userFilter.value = undefined;
   promptFilter.value = "";
   dateRangeFilter.value = null;
@@ -371,6 +375,7 @@ watch(
     sourceFilter,
     modelFilter,
     statusFilter,
+    fallbackFilter,
     userFilter,
     promptFilter,
     dateRangeFilter,
@@ -886,6 +891,15 @@ function handleEditImage(item: UserHistoryCard) {
         <a-select-option value="processing">处理中</a-select-option>
         <a-select-option value="success">成功</a-select-option>
         <a-select-option value="failed">失败</a-select-option>
+      </a-select>
+      <a-select
+        v-if="isAdminHistoryView"
+        v-model:value="fallbackFilter"
+        placeholder="备用接口"
+        class="history-filter-control history-filter-select"
+        allow-clear
+      >
+        <a-select-option value="used">使用了备用接口</a-select-option>
       </a-select>
       <a-select
         v-if="isAdminHistoryView"

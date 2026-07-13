@@ -10,7 +10,8 @@ from app.schemas.admin import (
     CreateUserRequest, UserOut, UpdateStatusRequest, UpdateRoleRequest,
     UpdateWhitelistRequest, UpdateRemarkRequest, ResetPasswordRequest, StatsOut, AllocateCreditsRequest, ResetCreditsRequest, CreditLogOut,
     CreateRedeemKeysBatchRequest, RedeemKeyBatchOut, RedeemKeyOut, UpdateRedeemKeyStatusRequest, PaymentOrderAdminOut,
-    AnalyticsSummaryOut, AnalyticsTimeseriesOut, AnalyticsBreakdownOut, AnalyticsRedeemRevenueOut, ErrorAnalyticsOut, DailyReportTestOut,
+    AnalyticsSummaryOut, AnalyticsTimeseriesOut, AnalyticsBreakdownOut, AnalyticsRedeemRevenueOut,
+    ErrorAnalyticsOut, ErrorCategoryTimeseriesOut, ErrorTaskListOut, DailyReportTestOut,
     AdminUserPromoDashboardOut,
 )
 from app.schemas.feedback import (
@@ -26,7 +27,7 @@ from app.services.admin_service import (
     update_user_whitelist, update_user_remark, reset_user_password, get_stats, allocate_credits, reset_user_credits, get_credit_logs,
     list_payment_orders,
     get_analytics_summary, get_analytics_timeseries, get_analytics_breakdown, get_analytics_redeem_revenue,
-    get_analytics_payment_revenue, get_error_analytics,
+    get_analytics_payment_revenue, get_error_analytics, get_error_category_timeseries, get_error_tasks,
 )
 from app.services.credit_redeem_service import create_redeem_key_batch, list_redeem_keys, update_redeem_key_status
 from app.services.promo_service import get_user_promo_dashboard_for_admin
@@ -363,6 +364,8 @@ def admin_error_analytics(
     start_date: Optional[datetime] = Query(None),
     end_date: Optional[datetime] = Query(None),
     model: Optional[str] = Query(None),
+    error_category: Optional[str] = Query(None),
+    used_fallback_api: Optional[bool] = Query(None),
     _user: User = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
@@ -371,6 +374,54 @@ def admin_error_analytics(
         start_date=start_date,
         end_date=end_date,
         model=model,
+        error_category=error_category,
+        used_fallback_api=used_fallback_api,
+    )
+
+
+@router.get("/analytics/errors/timeseries", response_model=ErrorCategoryTimeseriesOut)
+def admin_error_category_timeseries(
+    granularity: str = Query("3hour", pattern="^(1hour|3hour|6hour)$"),
+    start_date: Optional[datetime] = Query(None),
+    end_date: Optional[datetime] = Query(None),
+    model: Optional[str] = Query(None),
+    used_fallback_api: Optional[bool] = Query(None),
+    limit: int = Query(6, ge=1, le=12),
+    _user: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    return get_error_category_timeseries(
+        db,
+        granularity=granularity,
+        start_date=start_date,
+        end_date=end_date,
+        model=model,
+        used_fallback_api=used_fallback_api,
+        limit=limit,
+    )
+
+
+@router.get("/analytics/errors/tasks", response_model=ErrorTaskListOut)
+def admin_error_tasks(
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+    start_date: Optional[datetime] = Query(None),
+    end_date: Optional[datetime] = Query(None),
+    model: Optional[str] = Query(None),
+    error_category: Optional[str] = Query(None),
+    used_fallback_api: Optional[bool] = Query(None),
+    _user: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    return get_error_tasks(
+        db,
+        page=page,
+        page_size=page_size,
+        start_date=start_date,
+        end_date=end_date,
+        model=model,
+        error_category=error_category,
+        used_fallback_api=used_fallback_api,
     )
 
 
@@ -430,6 +481,7 @@ def admin_history_cards(
     prompt: Optional[str] = Query(None),
     status: Optional[str] = Query(None, pattern="^(pending|processing|success|failed)$"),
     user_id: Optional[str] = Query(None),
+    used_fallback_api: Optional[bool] = Query(None),
     start_date: Optional[datetime] = Query(None),
     end_date: Optional[datetime] = Query(None),
     _user: User = Depends(require_admin),
@@ -446,6 +498,7 @@ def admin_history_cards(
         model=model,
         prompt=prompt,
         status=status,
+        used_fallback_api=used_fallback_api,
         start_date=start_date,
         end_date=end_date,
     )

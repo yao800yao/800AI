@@ -103,8 +103,9 @@ const configColumns = [
 const bindingColumns = [
   { title: "调用场景", key: "scene", width: 220 },
   { title: "显示文案", key: "copy", width: 320 },
-  { title: "当前绑定接口", key: "current", width: 220 },
-  { title: "选择接口", key: "bind", width: 360 },
+  { title: "当前绑定接口", key: "current", width: 260 },
+  { title: "主接口", key: "bind", width: 320 },
+  { title: "备用接口", key: "backup", width: 320 },
   { title: "消耗积分", key: "credit", width: 180 },
   { title: "操作", key: "action", width: 320 },
 ];
@@ -131,6 +132,7 @@ const sceneForm = reactive<ExternalApiSceneBindingCreatePayload>({
   hide_resolution: false,
   hide_custom_size: true,
   api_config_id: null,
+  backup_api_config_id: null,
   display_name: "",
   subtitle: "",
   credit_cost: 4,
@@ -281,6 +283,7 @@ function resetSceneForm() {
   sceneForm.hide_resolution = false;
   sceneForm.hide_custom_size = true;
   sceneForm.api_config_id = null;
+  sceneForm.backup_api_config_id = null;
   sceneForm.display_name = "";
   sceneForm.subtitle = "";
   sceneForm.credit_cost = 4;
@@ -486,6 +489,7 @@ function openCopyScene(record: ExternalApiSceneBinding) {
   sceneForm.hide_resolution = !!record.hide_resolution;
   sceneForm.hide_custom_size = !!record.hide_custom_size;
   sceneForm.api_config_id = record.api_config_id ?? null;
+  sceneForm.backup_api_config_id = record.backup_api_config_id ?? null;
   sceneForm.display_name = record.display_name || "";
   sceneForm.subtitle = record.subtitle || "";
   sceneForm.credit_cost = Number(record.credit_cost || 0);
@@ -676,6 +680,7 @@ async function handleBindingChange(
   sceneKey: ExternalApiSceneBinding["scene_key"],
   payload: {
     api_config_id: number | null;
+    backup_api_config_id: number | null;
     credit_cost: number;
     resolution_credit_costs_json: string;
     display_name: string;
@@ -696,6 +701,7 @@ async function handleBindingChange(
 
 function buildBindingPayload(record: ExternalApiSceneBinding, overrides: Partial<{
   api_config_id: number | null;
+  backup_api_config_id: number | null;
   credit_cost: number;
   resolution_credit_costs_json: string;
   display_name: string;
@@ -703,6 +709,7 @@ function buildBindingPayload(record: ExternalApiSceneBinding, overrides: Partial
 }> = {}) {
   return {
     api_config_id: overrides.api_config_id ?? record.api_config_id ?? null,
+    backup_api_config_id: overrides.backup_api_config_id ?? record.backup_api_config_id ?? null,
     credit_cost: overrides.credit_cost ?? record.credit_cost,
     resolution_credit_costs_json: overrides.resolution_credit_costs_json ?? record.resolution_credit_costs_json ?? DEFAULT_RESOLUTION_CREDIT_COSTS_JSON,
     display_name: overrides.display_name ?? record.display_name ?? "",
@@ -737,6 +744,7 @@ async function handleCreateScene() {
       hide_resolution: !!sceneForm.hide_resolution,
       hide_custom_size: !!sceneForm.hide_custom_size,
       api_config_id: sceneForm.api_config_id ?? null,
+      backup_api_config_id: sceneForm.backup_api_config_id ?? null,
       display_name: sceneForm.display_name.trim(),
       subtitle: sceneForm.subtitle.trim(),
       credit_cost: Number(sceneForm.credit_cost || 0),
@@ -1061,7 +1069,7 @@ function copySecret(value: string, label: string) {
           :data-source="filteredSceneBindings"
           :loading="loading"
           :pagination="false"
-          :scroll="{ x: 1240 }"
+          :scroll="{ x: 1540 }"
         >
           <template #bodyCell="{ column, record }">
             <template v-if="column.key === 'scene'">
@@ -1098,26 +1106,63 @@ function copySecret(value: string, label: string) {
               </div>
             </template>
             <template v-else-if="column.key === 'current'">
-              <div v-if="record.api_config_name">
-                <div>{{ record.api_config_name }}</div>
-                <a-space size="small">
-                  <a-tag class="api-tag api-tag-group">{{ record.api_group_name || "未分组" }}</a-tag>
-                  <a-tag class="api-tag" :class="record.api_status === 'enabled' ? 'api-tag-enabled' : 'api-tag-muted'">
-                    {{ record.api_status === "enabled" ? "启用" : "停用" }}
-                  </a-tag>
-                </a-space>
+              <div class="binding-current-stack">
+                <div>
+                  <div class="scene-desc" style="margin-bottom: 4px">主接口</div>
+                  <div v-if="record.api_config_name">
+                    <div>{{ record.api_config_name }}</div>
+                    <a-space size="small">
+                      <a-tag class="api-tag api-tag-group">{{ record.api_group_name || "未分组" }}</a-tag>
+                      <a-tag class="api-tag" :class="record.api_status === 'enabled' ? 'api-tag-enabled' : 'api-tag-muted'">
+                        {{ record.api_status === "enabled" ? "启用" : "停用" }}
+                      </a-tag>
+                    </a-space>
+                  </div>
+                  <span v-else class="scene-desc">未绑定</span>
+                </div>
+                <div>
+                  <div class="scene-desc" style="margin-bottom: 4px">备用接口</div>
+                  <div v-if="record.backup_api_config_name">
+                    <div>{{ record.backup_api_config_name }}</div>
+                    <a-space size="small">
+                      <a-tag class="api-tag api-tag-group">{{ record.backup_api_group_name || "未分组" }}</a-tag>
+                      <a-tag class="api-tag" :class="record.backup_api_status === 'enabled' ? 'api-tag-enabled' : 'api-tag-muted'">
+                        {{ record.backup_api_status === "enabled" ? "启用" : "停用" }}
+                      </a-tag>
+                    </a-space>
+                  </div>
+                  <span v-else class="scene-desc">未绑定</span>
+                </div>
               </div>
-              <span v-else class="scene-desc">未绑定</span>
             </template>
             <template v-else-if="column.key === 'bind'">
               <a-select
                 :value="record.api_config_id ?? undefined"
                 class="warm-select"
                 allow-clear
-                placeholder="请选择接口"
-                style="width: 320px"
+                placeholder="请选择主接口"
+                style="width: 280px"
                 :loading="bindingSavingKey === record.scene_key"
                 @change="(value: number | undefined) => handleBindingChange(record.scene_key, buildBindingPayload(record, { api_config_id: value ?? null }))"
+              >
+                <a-select-option
+                  v-for="option in getBindingOptions()"
+                  :key="option.value"
+                  :value="option.value"
+                >
+                  {{ option.label }}
+                </a-select-option>
+              </a-select>
+            </template>
+            <template v-else-if="column.key === 'backup'">
+              <a-select
+                :value="record.backup_api_config_id ?? undefined"
+                class="warm-select"
+                allow-clear
+                placeholder="请选择备用接口"
+                style="width: 280px"
+                :loading="bindingSavingKey === record.scene_key"
+                @change="(value: number | undefined) => handleBindingChange(record.scene_key, buildBindingPayload(record, { backup_api_config_id: value ?? null }))"
               >
                 <a-select-option
                   v-for="option in getBindingOptions()"
@@ -1320,6 +1365,23 @@ function copySecret(value: string, label: string) {
             class="warm-select"
             allow-clear
             placeholder="可选，创建后也可在列表中再绑定"
+          >
+            <a-select-option
+              v-for="option in getBindingOptions()"
+              :key="option.value"
+              :value="option.value"
+            >
+              {{ option.label }}
+            </a-select-option>
+          </a-select>
+        </a-form-item>
+
+        <a-form-item label="备用接口">
+          <a-select
+            v-model:value="sceneForm.backup_api_config_id"
+            class="warm-select"
+            allow-clear
+            placeholder="可选，主接口 502/503/504 或缺少配置路径结果时自动切换"
           >
             <a-select-option
               v-for="option in getBindingOptions()"

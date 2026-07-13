@@ -200,6 +200,7 @@ class AnalyticsRedeemRevenueOut(BaseModel):
 
 
 class ErrorAnalyticsItemOut(BaseModel):
+    error_category: str
     error_message: str
     count: int = 0
 
@@ -207,8 +208,60 @@ class ErrorAnalyticsItemOut(BaseModel):
 class ErrorAnalyticsOut(BaseModel):
     range_label: str
     total_failed_tasks: int
+    fallback_task_total: int = 0
+    fallback_success_tasks: int = 0
+    fallback_failed_tasks: int = 0
+    distinct_error_categories: int
     distinct_error_messages: int
     items: list[ErrorAnalyticsItemOut]
+
+
+class ErrorCategoryTimeseriesPointOut(BaseModel):
+    label: str
+    bucket_start: datetime | None = None
+    bucket_end: datetime | None = None
+    total_failed_tasks: int = 0
+    categories: dict[str, int]
+
+
+class ErrorCategoryTimeseriesSeriesOut(BaseModel):
+    error_category: str
+    total_count: int = 0
+
+
+class ErrorCategoryTimeseriesOut(BaseModel):
+    granularity: str
+    range_label: str
+    series: list[ErrorCategoryTimeseriesSeriesOut]
+    points: list[ErrorCategoryTimeseriesPointOut]
+
+
+class ErrorTaskItemOut(BaseModel):
+    task_id: str
+    user_id: str = ""
+    username: str = ""
+    avatar_url: str = ""
+    task_type: str = "text_generate"
+    model: str = ""
+    source: str = "web"
+    mode: str = "generate"
+    prompt: str = ""
+    status: str = "failed"
+    error_message: str = ""
+    credit_cost: int = 0
+    credit_refunded: bool = False
+    used_fallback_api: bool = False
+    primary_api_config_name: str = ""
+    primary_http_status: int | None = None
+    fallback_api_config_name: str = ""
+    fallback_status: str = "unused"
+    fallback_error_message: str = ""
+    created_at: datetime | None = None
+
+
+class ErrorTaskListOut(BaseModel):
+    total: int
+    items: list[ErrorTaskItemOut]
 
 
 class DailyReportTestOut(BaseModel):

@@ -734,6 +734,7 @@ def get_admin_history_cards(
     model: str | None = None,
     prompt: str | None = None,
     status: str | None = None,
+    used_fallback_api: bool | None = None,
     start_date: datetime | None = None,
     end_date: datetime | None = None,
 ):
@@ -841,6 +842,11 @@ def get_admin_history_cards(
             task_without_image_query = task_without_image_query.filter(Task.prompt.ilike(f"%{keyword}%"))
             if prompt_reverse_query is not None:
                 prompt_reverse_query = prompt_reverse_query.filter(PromptHistory.prompt.ilike(f"%{keyword}%"))
+    if used_fallback_api is not None:
+        image_query = image_query.filter(Task.used_fallback_api.is_(bool(used_fallback_api)))
+        running_task_query = running_task_query.filter(Task.used_fallback_api.is_(bool(used_fallback_api)))
+        task_without_image_query = task_without_image_query.filter(Task.used_fallback_api.is_(bool(used_fallback_api)))
+        prompt_reverse_query = None
     if status:
         if status == "processing":
             image_query = image_query.filter(Task.id.is_(None))

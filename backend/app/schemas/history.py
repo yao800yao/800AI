@@ -16,6 +16,21 @@ class HistoryImageOut(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class TaskApiAttemptOut(BaseModel):
+    id: int | None = None
+    image_id: int | None = None
+    image_index: int | None = None
+    api_config_id: int | None = None
+    api_config_name: str = ""
+    attempt_index: int = 1
+    is_fallback: bool = False
+    status: str = "failed"
+    http_status: int | None = None
+    error_message: str = ""
+    duration_ms: int | None = None
+    created_at: datetime | None = None
+
+
 class HistoryItem(BaseModel):
     item_type: str = "task"
     task_id: str | None = None
@@ -36,6 +51,7 @@ class HistoryItem(BaseModel):
     custom_size: str = ""
     credit_cost: int = 0
     credit_refunded: bool = False
+    used_fallback_api: bool = False
     status: str
     error_message: str = ""
     task_is_deleted: bool = False
@@ -43,6 +59,7 @@ class HistoryItem(BaseModel):
     soft_deleted_count: int = 0
     created_at: datetime | None = None
     images: list[HistoryImageOut] = []
+    api_attempts: list[TaskApiAttemptOut] = []
 
 
 class HistoryResponse(BaseModel):
@@ -87,10 +104,12 @@ class UserHistoryCardItem(BaseModel):
     custom_size: str = ""
     credit_cost: int = 0
     credit_refunded: bool = False
+    used_fallback_api: bool = False
     created_at: datetime | None = None
     run_time: int | None = None
     error_message: str = ""
     images: list[HistoryImageOut] = []
+    api_attempts: list[TaskApiAttemptOut] = []
 
 
 class UserHistoryResponse(BaseModel):
